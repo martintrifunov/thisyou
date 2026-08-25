@@ -158,9 +158,6 @@ func mergeItem(preferred, other Item) Item {
 	if preferred.CreatedUTC == 0 {
 		preferred.CreatedUTC = other.CreatedUTC
 	}
-	if preferred.Score == 0 {
-		preferred.Score = other.Score
-	}
 	if preferred.Title == "" {
 		preferred.Title = other.Title
 	}
@@ -172,9 +169,6 @@ func mergeItem(preferred, other Item) Item {
 	}
 	if preferred.URL == "" {
 		preferred.URL = other.URL
-	}
-	if preferred.NumComments == 0 {
-		preferred.NumComments = other.NumComments
 	}
 	preferred.Over18 = preferred.Over18 || other.Over18
 	for _, source := range other.Sources {

@@ -91,3 +91,13 @@ func TestDecodeItemSanitizesTerminalControlCharacters(t *testing.T) {
 		t.Fatalf("body = %q", item.Body)
 	}
 }
+
+func TestMergeItemPreservesPreferredZeroValues(t *testing.T) {
+	t.Parallel()
+	preferred := Item{ID: "same", Score: 0, NumComments: 0, Sources: []string{"Arctic Shift"}}
+	other := Item{ID: "same", Score: 25, NumComments: 12, Sources: []string{"PullPush"}}
+	merged := mergeItem(preferred, other)
+	if merged.Score != 0 || merged.NumComments != 0 {
+		t.Fatalf("merged numeric values = score %d, comments %d", merged.Score, merged.NumComments)
+	}
+}
