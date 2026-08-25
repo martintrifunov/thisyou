@@ -325,6 +325,26 @@ func TestOpenMissingCachedHistoryReturnsToSearch(t *testing.T) {
 	}
 }
 
+func TestPartialCrawlPreservesCachedRecords(t *testing.T) {
+	store := &fakeHistoryStore{
+		found: true,
+		snapshot: historycache.Snapshot{
+			Username: "alice",
+			Posts:    []reddit.Item{{Kind: reddit.Post, ID: "cached", CreatedUTC: 1}},
+		},
+	}
+	partial := searchResult{
+		Posts:  []reddit.Item{{Kind: reddit.Post, ID: "fresh", CreatedUTC: 2}},
+		Errors: []error{errors.New("archive unavailable")},
+	}
+	if err := cacheSnapshot(store, "alice", partial); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.saved.Posts) != 2 || store.saved.Posts[0].ID != "fresh" || store.saved.Posts[1].ID != "cached" {
+		t.Fatalf("saved partial snapshot posts = %#v", store.saved.Posts)
+	}
+}
+
 func TestLatestTimestamp(t *testing.T) {
 	t.Parallel()
 	items := []reddit.Item{{CreatedUTC: 15}, {CreatedUTC: 42}, {CreatedUTC: 8}}

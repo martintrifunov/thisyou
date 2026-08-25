@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/maco/thisyou/internal/historycache"
+	"github.com/maco/thisyou/internal/reddit"
 )
 
 type historyStore interface {
@@ -39,6 +40,12 @@ func (m *Model) beginCachedSearch() tea.Cmd {
 }
 
 func cacheSnapshot(store historyStore, username string, result searchResult) error {
+	if len(result.Errors) > 0 {
+		cached, found, err := store.Load(username)
+		if err == nil && found {
+			result = reddit.MergeResults(searchResult{Posts: cached.Posts, Comments: cached.Comments}, result)
+		}
+	}
 	return store.Save(historycache.Snapshot{
 		Username: username,
 		SavedAt:  time.Now().UTC(),
