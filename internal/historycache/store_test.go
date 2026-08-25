@@ -63,3 +63,19 @@ func TestStoreRejectsUnsafeUsername(t *testing.T) {
 		t.Fatal("unsafe username was loaded")
 	}
 }
+
+func TestStoreCanonicalizesUsernameCase(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	store := NewStoreAt(directory)
+	if err := store.Save(Snapshot{Username: "Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, found, err := store.Load("ALICE")
+	if err != nil || !found || loaded.Username != "alice" {
+		t.Fatalf("loaded snapshot = %+v, found = %v, error = %v", loaded, found, err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "alice.json")); err != nil {
+		t.Fatal(err)
+	}
+}

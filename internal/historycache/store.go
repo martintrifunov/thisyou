@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,9 +51,11 @@ func (s *Store) Load(username string) (Snapshot, bool, error) {
 	if s.pathErr != nil {
 		return Snapshot{}, false, s.pathErr
 	}
-	if err := validateUsername(username); err != nil {
+	normalized, err := normalizeUsername(username)
+	if err != nil {
 		return Snapshot{}, false, err
 	}
+	username = normalized
 	data, err := os.ReadFile(s.path(username))
 	if errors.Is(err, os.ErrNotExist) {
 		return Snapshot{}, false, nil
@@ -67,9 +70,10 @@ func (s *Store) Load(username string) (Snapshot, bool, error) {
 	if stored.Version != fileVersion {
 		return Snapshot{}, false, fmt.Errorf("unsupported history cache version %d", stored.Version)
 	}
-	if stored.Snapshot.Username != username {
+	if !strings.EqualFold(stored.Snapshot.Username, username) {
 		return Snapshot{}, false, fmt.Errorf("cached username does not match u/%s", username)
 	}
+	stored.Snapshot.Username = username
 	return stored.Snapshot, true, nil
 }
 
@@ -82,9 +86,11 @@ func (s *Store) Save(snapshot Snapshot) error {
 	if snapshot.Username == "" {
 		return fmt.Errorf("cached username is empty")
 	}
-	if err := validateUsername(snapshot.Username); err != nil {
+	normalized, err := normalizeUsername(snapshot.Username)
+	if err != nil {
 		return err
 	}
+	snapshot.Username = normalized
 	if snapshot.SavedAt.IsZero() {
 		snapshot.SavedAt = time.Now().UTC()
 	}
@@ -120,10 +126,10 @@ func (s *Store) path(username string) string {
 	return filepath.Join(s.directory, username+".json")
 }
 
-func validateUsername(username string) error {
+func normalizeUsername(username string) (string, error) {
 	normalized, err := reddit.NormalizeUsername(username)
-	if err != nil || normalized != username {
-		return fmt.Errorf("invalid cached username")
+	if err != nil || normalized != strings.ToLower(username) {
+		return "", fmt.Errorf("invalid cached username")
 	}
-	return nil
+	return normalized, nil
 }

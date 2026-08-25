@@ -31,5 +31,5 @@ func NormalizeUsername(input string) (string, error) {
 	if !usernamePattern.MatchString(name) {
 		return "", fmt.Errorf("use 1-30 letters, numbers, underscores, or hyphens")
 	}
-	return name, nil
+	return strings.ToLower(name), nil
 }

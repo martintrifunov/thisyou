@@ -11,6 +11,7 @@ func TestNormalizeUsername(t *testing.T) {
 		"@spez":                             "spez",
 		"https://www.reddit.com/user/spez/": "spez",
 		"https://reddit.com/u/spez":         "spez",
+		"U/Some_User":                       "some_user",
 	}
 	for input, want := range tests {
 		input, want := input, want
