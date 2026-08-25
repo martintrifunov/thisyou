@@ -3,6 +3,7 @@ package reddit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -125,5 +126,22 @@ func TestSearchAllRetainsPartialResultsOnSourceError(t *testing.T) {
 	}
 	if len(result.Errors) != 3 {
 		t.Fatalf("got %d errors, want 3: %v", len(result.Errors), result.Errors)
+	}
+}
+
+func TestCancellationInterruptsRetryDelay(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "retry later", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.RetryDelay = time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(10*time.Millisecond, cancel)
+	_, err := client.get(ctx, server.URL, true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("get error = %v, want context.Canceled", err)
 	}
 }

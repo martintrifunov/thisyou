@@ -26,7 +26,6 @@ type source struct {
 	base string
 }
 
-// Progress describes a completed archive page, or a source that has finished.
 type Progress struct {
 	Kind   Kind
 	Source string
@@ -37,14 +36,12 @@ type Progress struct {
 	Err    error
 }
 
-// Result contains all successfully retrieved, merged records and any source errors.
 type Result struct {
 	Posts    []Item
 	Comments []Item
 	Errors   []error
 }
 
-// Client retrieves public Reddit archive records from Arctic Shift and PullPush.
 type Client struct {
 	HTTP        *http.Client
 	ArcticShift string
@@ -61,7 +58,6 @@ func NewClient() *Client {
 	}
 }
 
-// SearchAll crawls posts and comments from both sources concurrently. Progress may be nil.
 func (c *Client) SearchAll(ctx context.Context, username string, progress func(Progress)) Result {
 	type crawlResult struct {
 		kind   Kind
@@ -205,22 +201,24 @@ func (c *Client) get(ctx context.Context, endpoint string, retry bool) ([]byte, 
 	res, err := client.Do(req)
 	if err != nil {
 		if retry && ctx.Err() == nil {
-			if err := wait(ctx, c.RetryDelay); err == nil {
-				return c.get(ctx, endpoint, false)
+			if waitErr := wait(ctx, c.RetryDelay); waitErr != nil {
+				return nil, waitErr
 			}
+			return c.get(ctx, endpoint, false)
 		}
 		return nil, err
 	}
-	defer res.Body.Close()
 	body, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
+	_ = res.Body.Close()
 	if readErr != nil {
 		return nil, readErr
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		if retry && (res.StatusCode == http.StatusTooManyRequests || res.StatusCode >= 500) {
-			if err := wait(ctx, c.RetryDelay); err == nil {
-				return c.get(ctx, endpoint, false)
+			if waitErr := wait(ctx, c.RetryDelay); waitErr != nil {
+				return nil, waitErr
 			}
+			return c.get(ctx, endpoint, false)
 		}
 		message := strings.TrimSpace(string(body))
 		if len(message) > 180 {
