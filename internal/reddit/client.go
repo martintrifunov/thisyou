@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -230,7 +231,11 @@ func (c *Client) get(ctx context.Context, endpoint string, retry bool) ([]byte, 
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		if retry && (res.StatusCode == http.StatusTooManyRequests || res.StatusCode >= 500) {
-			if waitErr := wait(ctx, c.RetryDelay); waitErr != nil {
+			delay := c.RetryDelay
+			if res.StatusCode == http.StatusTooManyRequests {
+				delay = rateLimitDelay(res.Header, time.Now(), delay)
+			}
+			if waitErr := wait(ctx, delay); waitErr != nil {
 				return nil, waitErr
 			}
 			return c.get(ctx, endpoint, false)
@@ -245,6 +250,32 @@ func (c *Client) get(ctx context.Context, endpoint string, retry bool) ([]byte, 
 		return nil, fmt.Errorf("HTTP %d: %s", res.StatusCode, message)
 	}
 	return body, nil
+}
+
+func rateLimitDelay(header http.Header, now time.Time, fallback time.Duration) time.Duration {
+	if value := strings.TrimSpace(header.Get("Retry-After")); value != "" {
+		if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds >= 0 {
+			return time.Duration(seconds * float64(time.Second))
+		}
+		if reset, err := http.ParseTime(value); err == nil && reset.After(now) {
+			return reset.Sub(now)
+		}
+	}
+	if value := strings.TrimSpace(header.Get("X-RateLimit-Reset")); value != "" {
+		if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds >= 0 {
+			return time.Duration(seconds * float64(time.Second))
+		}
+	}
+	if value := strings.TrimSpace(header.Get("X-RateLimit-Reset-At")); value != "" {
+		if timestamp, err := strconv.ParseFloat(value, 64); err == nil {
+			seconds := int64(timestamp)
+			reset := time.Unix(seconds, int64((timestamp-float64(seconds))*float64(time.Second)))
+			if reset.After(now) {
+				return reset.Sub(now)
+			}
+		}
+	}
+	return max(0, fallback)
 }
 
 func wait(ctx context.Context, delay time.Duration) error {

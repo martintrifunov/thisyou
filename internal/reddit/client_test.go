@@ -160,6 +160,34 @@ func TestRateLimitErrorHidesProviderMessage(t *testing.T) {
 	}
 }
 
+func TestRateLimitDelayUsesProviderHeaders(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		key   string
+		value string
+		want  time.Duration
+	}{
+		{"retry seconds", "Retry-After", "7", 7 * time.Second},
+		{"retry date", "Retry-After", now.Add(9 * time.Second).Format(http.TimeFormat), 9 * time.Second},
+		{"reset seconds", "X-RateLimit-Reset", "11.5", 11500 * time.Millisecond},
+		{"reset timestamp", "X-RateLimit-Reset-At", "1787659213", 13 * time.Second},
+		{"fallback", "", "", 1200 * time.Millisecond},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			header := make(http.Header)
+			if test.key != "" {
+				header.Set(test.key, test.value)
+			}
+			if got := rateLimitDelay(header, now, 1200*time.Millisecond); got != test.want {
+				t.Fatalf("delay = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestSearchAfterUsesIndependentKindBoundaries(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex
