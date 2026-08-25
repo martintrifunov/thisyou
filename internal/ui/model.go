@@ -104,6 +104,7 @@ type Model struct {
 	bookmarkRequest  uint64
 
 	filtering   bool
+	filterErr   string
 	status      map[string]reddit.Progress
 	errors      []error
 	searchErr   string
@@ -130,7 +131,7 @@ func New(client *reddit.Client) *Model {
 	in.TextStyle = lipgloss.NewStyle().Foreground(foreground)
 
 	filter := textinput.New()
-	filter.Placeholder = "filter current results"
+	filter.Placeholder = "text or sub:golang after:2025-01-01 min:10"
 	filter.Prompt = "/ "
 	filter.CharLimit = 100
 	filter.PromptStyle = lipgloss.NewStyle().Foreground(orange)
@@ -298,6 +299,9 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.String() {
 			case "enter":
+				if m.filterErr != "" {
+					return m, nil
+				}
 				m.filtering = false
 				m.filter.Blur()
 				return m, nil
@@ -305,6 +309,7 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filtering = false
 				m.filter.SetValue("")
 				m.filter.Blur()
+				m.filterErr = ""
 				m.refreshVisible()
 				return m, nil
 			}
@@ -478,6 +483,7 @@ func (m *Model) beginSearch() tea.Cmd {
 	m.notice = ""
 	m.noticeError = false
 	m.filtering = false
+	m.filterErr = ""
 	m.filter.SetValue("")
 	m.filter.Blur()
 	m.tab = allTab
@@ -531,14 +537,18 @@ func (m *Model) refreshVisible() {
 		source = append(source, m.comments...)
 		sort.SliceStable(source, func(i, j int) bool { return source[i].CreatedUTC > source[j].CreatedUTC })
 	}
-	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
-	if query == "" {
+	filter, err := parseResultFilter(m.filter.Value())
+	if err != nil {
+		m.filterErr = err.Error()
+		m.visible = nil
+	} else if strings.TrimSpace(m.filter.Value()) == "" {
+		m.filterErr = ""
 		m.visible = source
 	} else {
+		m.filterErr = ""
 		m.visible = make([]reddit.Item, 0, len(source))
 		for _, item := range source {
-			haystack := strings.ToLower(strings.Join([]string{item.Title, item.Body, item.Subreddit, item.Author}, "\n"))
-			if strings.Contains(haystack, query) {
+			if filter.matches(item) {
 				m.visible = append(m.visible, item)
 			}
 		}
@@ -566,6 +576,9 @@ func (m *Model) ensureVisible() {
 func (m *Model) pageRows() int {
 	chrome := 5
 	if m.filtering || m.filter.Value() != "" {
+		chrome++
+	}
+	if m.filterErr != "" {
 		chrome++
 	}
 	if len(m.errors) > 0 {
@@ -716,6 +729,9 @@ func (m *Model) viewResults() string {
 	b.WriteString("\n")
 	if m.filtering || m.filter.Value() != "" {
 		b.WriteString(m.renderFilterInput() + "\n")
+	}
+	if m.filterErr != "" {
+		b.WriteString(errorStyle.Render(truncate(m.filterErr, contentWidth)) + "\n")
 	}
 	if len(m.visible) == 0 {
 		b.WriteString("\n" + mutedStyle.Render(wrapText("No archived records found for this view.", contentWidth)) + "\n")

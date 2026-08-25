@@ -75,6 +75,10 @@ After pressing `y`, use `u` for the Reddit URL, `t` for record text, `a` for
 the author, `s` for the subreddit, or `l` for the linked URL. Press `esc` to
 close the copy menu.
 
+The `/` filter accepts text plus optional query tokens: `sub:golang`,
+`type:post`, `after:2025-01-01`, `before:2025-12-31`, `min:10`, and `max:100`.
+Dates are inclusive and plain text terms must all match.
+
 URLs in an inspected record are clickable terminal links. Ctrl-click them to
 open a browser tab; some macOS terminals use Cmd-click instead. The `o` key
 remains available when terminal hyperlinks are unsupported.
