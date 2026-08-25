@@ -146,6 +146,20 @@ func TestCancellationInterruptsRetryDelay(t *testing.T) {
 	}
 }
 
+func TestRateLimitErrorHidesProviderMessage(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "long misleading scraping message", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.RetryDelay = 0
+	_, err := client.get(context.Background(), server.URL, true)
+	if err == nil || err.Error() != "HTTP 429: rate limited this connection" {
+		t.Fatalf("rate-limit error = %q", err)
+	}
+}
+
 func TestSearchAfterUsesIndependentKindBoundaries(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex

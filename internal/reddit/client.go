@@ -235,6 +235,9 @@ func (c *Client) get(ctx context.Context, endpoint string, retry bool) ([]byte, 
 			}
 			return c.get(ctx, endpoint, false)
 		}
+		if res.StatusCode == http.StatusTooManyRequests {
+			return nil, fmt.Errorf("HTTP 429: rate limited this connection")
+		}
 		message := strings.TrimSpace(string(body))
 		if len(message) > 180 {
 			message = message[:180] + "..."
