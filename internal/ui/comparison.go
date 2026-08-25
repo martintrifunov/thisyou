@@ -252,13 +252,21 @@ func profileCoverage(summary profileSummary) string {
 func (m *Model) viewCompareInput() string {
 	var b strings.Builder
 	contentWidth := max(4, min(58, m.width-4))
-	b.WriteString(logoStyle.Render("THIS YOU?  /  COMPARE"))
-	b.WriteString("\n\n" + titleStyle.Render(wrapText("Compare u/"+m.username+" with another Redditor", contentWidth)))
-	b.WriteString("\n\n" + m.renderCompareInput())
+	if m.width >= 76 && m.height >= 20 {
+		b.WriteString(logoStyle.Render(strings.TrimPrefix(logo, "\n")))
+	} else {
+		b.WriteString(logoStyle.Render("THIS YOU?  /  COMPARE"))
+	}
+	gap := "\n\n"
+	if m.height < 16 {
+		gap = "\n"
+	}
+	b.WriteString(gap + titleStyle.Render(wrapText("Compare u/"+m.username+" with another Redditor", contentWidth)))
+	b.WriteString(gap + m.renderCompareInput())
 	if m.compareErr != "" {
 		b.WriteString("\n" + errorStyle.Render(wrapText(m.compareErr, contentWidth)))
 	}
-	b.WriteString("\n\n" + mutedStyle.Render(wrapText("enter compare  •  esc return  •  ctrl+c quit", contentWidth)))
+	b.WriteString(gap + mutedStyle.Render(wrapText("enter compare  •  esc return  •  ctrl+c quit", contentWidth)))
 	return center(m.width, m.height, b.String())
 }
 

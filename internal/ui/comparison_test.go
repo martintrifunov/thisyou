@@ -92,3 +92,18 @@ func TestComparisonScreensFillAndReflow(t *testing.T) {
 		assertViewSize(t, m.View(), size.Width, size.Height)
 	}
 }
+
+func TestComparisonInputUsesFullLogoWhenItFits(t *testing.T) {
+	m := New(nil)
+	m.username = "alice"
+	m.screen = compareInputScreen
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "_______") {
+		t.Fatalf("wide comparison input is missing full logo: %q", got)
+	}
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 16})
+	got := ansi.Strip(m.View())
+	if strings.Contains(got, "_______") || !strings.Contains(got, "THIS YOU?  /  COMPARE") {
+		t.Fatalf("compact comparison header = %q", got)
+	}
+}
