@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
-// Kind identifies the Reddit object represented by an Item.
 type Kind string
 
 const (
@@ -16,7 +16,6 @@ const (
 	Comment Kind = "comment"
 )
 
-// Item is the common subset of an archived Reddit post or comment used by the UI.
 type Item struct {
 	Kind        Kind
 	ID          string
@@ -42,7 +41,7 @@ func (i Item) RedditURL() string {
 	if i.Permalink != "" {
 		return "https://www.reddit.com" + "/" + strings.TrimPrefix(i.Permalink, "/")
 	}
-	return i.URL
+	return ""
 }
 
 type archiveItem struct {
@@ -65,6 +64,7 @@ func decodeItem(raw json.RawMessage, kind Kind, source string) (Item, error) {
 	if err := json.Unmarshal(raw, &record); err != nil {
 		return Item{}, err
 	}
+	record.ID = sanitizeText(record.ID, false)
 	if record.ID == "" {
 		return Item{}, fmt.Errorf("record has no id")
 	}
@@ -79,18 +79,33 @@ func decodeItem(raw json.RawMessage, kind Kind, source string) (Item, error) {
 	return Item{
 		Kind:        kind,
 		ID:          record.ID,
-		Author:      record.Author,
-		Subreddit:   record.Subreddit,
+		Author:      sanitizeText(record.Author, false),
+		Subreddit:   sanitizeText(record.Subreddit, false),
 		CreatedUTC:  created,
 		Score:       record.Score,
-		Title:       record.Title,
-		Body:        body,
-		Permalink:   record.Permalink,
-		URL:         record.URL,
+		Title:       sanitizeText(record.Title, false),
+		Body:        sanitizeText(body, true),
+		Permalink:   sanitizeText(record.Permalink, false),
+		URL:         sanitizeText(record.URL, false),
 		NumComments: record.NumComments,
 		Over18:      record.Over18,
 		Sources:     []string{source},
 	}, nil
+}
+
+func sanitizeText(value string, multiline bool) string {
+	return strings.Map(func(r rune) rune {
+		if multiline && r == '\n' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			if unicode.IsSpace(r) {
+				return ' '
+			}
+			return -1
+		}
+		return r
+	}, value)
 }
 
 func parseTimestamp(raw json.RawMessage) (int64, error) {
