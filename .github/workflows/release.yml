@@ -1,0 +1,35 @@
+name: Release binaries
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Windows archives
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${VERSION#v}"
+          mkdir -p dist/windows-amd64 dist/windows-arm64
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/windows-amd64/thisyou.exe ./cmd/thisyou
+          GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/windows-arm64/thisyou.exe ./cmd/thisyou
+          (cd dist/windows-amd64 && zip -q ../thisyou-windows-amd64.zip thisyou.exe)
+          (cd dist/windows-arm64 && zip -q ../thisyou-windows-arm64.zip thisyou.exe)
+          (cd dist && sha256sum thisyou-windows-*.zip > SHA256SUMS)
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/thisyou-windows-*.zip dist/SHA256SUMS --clobber

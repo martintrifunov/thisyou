@@ -19,6 +19,20 @@ jobs:
       - name: Test
         shell: powershell
         run: .\build.ps1 -Task Test
+      - name: Validate installer
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\install.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
       - name: Build
         shell: powershell
         run: .\build.ps1 -Task Build
