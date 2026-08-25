@@ -66,6 +66,7 @@ thisyou --version
 | `B` | Open saved bookmarks from results |
 | `ctrl+b` | Open saved bookmarks from the username screen |
 | `ctrl+o` | Open the entered user's most recent cached crawl offline |
+| `?` | Open the complete command reference |
 | `o` | Open the selected record on Reddit |
 | `y` | Copy the record URL, text, author, subreddit, or linked URL |
 | `/` | Filter the current view |

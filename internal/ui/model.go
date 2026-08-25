@@ -43,6 +43,7 @@ const (
 	compareInputScreen
 	compareLoadingScreen
 	comparisonScreen
+	helpScreen
 )
 
 type tab int
@@ -105,6 +106,8 @@ type Model struct {
 	summary      viewport.Model
 	diagnostics  viewport.Model
 	comparison   viewport.Model
+	help         viewport.Model
+	helpReturn   screen
 
 	posts    []reddit.Item
 	comments []reddit.Item
@@ -200,6 +203,7 @@ func New(client *reddit.Client) *Model {
 		summary:       viewport.New(80, 20),
 		diagnostics:   viewport.New(80, 20),
 		comparison:    viewport.New(80, 20),
+		help:          viewport.New(80, 20),
 		status:        make(map[string]reddit.Progress),
 		bookmarkIDs:   make(map[string]struct{}),
 		compareStatus: make(map[string]reddit.Progress),
@@ -220,6 +224,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeSummary()
 		m.resizeDiagnostics()
 		m.resizeComparison()
+		m.resizeHelp()
 		m.ensureVisible()
 		return m, nil
 	case searchEvent:
@@ -316,6 +321,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if ok && key.String() == "ctrl+b" && (m.screen == searchScreen || m.screen == resultsScreen) {
 		return m, m.openBookmarks()
 	}
+	if ok && key.String() == "?" && m.screen != loadingScreen && m.screen != compareLoadingScreen && m.screen != helpScreen {
+		m.openHelp()
+		return m, nil
+	}
 
 	switch m.screen {
 	case searchScreen:
@@ -338,6 +347,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCompareLoading(msg)
 	case comparisonScreen:
 		return m.updateComparison(msg)
+	case helpScreen:
+		return m.updateHelp(msg)
 	default:
 		return m, nil
 	}
@@ -894,6 +905,8 @@ func (m *Model) View() string {
 		return m.viewCompareLoading()
 	case comparisonScreen:
 		return m.viewComparison()
+	case helpScreen:
+		return m.viewHelp()
 	default:
 		return ""
 	}
@@ -922,9 +935,9 @@ func (m *Model) viewSearch() string {
 	if m.searchErr != "" {
 		b.WriteString("\n" + errorStyle.Render(wrapText(m.searchErr, contentWidth)))
 	}
-	help := "enter search  •  ctrl+o offline  •  ctrl+b bookmarks  •  ctrl+c quit"
+	help := "enter search  •  ctrl+o offline  •  ? help  •  ctrl+c quit"
 	if m.width < 30 {
-		help = "enter  •  ^o cache  •  ^b saved  •  ^c quit"
+		help = "enter  •  ^o cache  •  ? help  •  ^c quit"
 	}
 	b.WriteString(gap + mutedStyle.Render(wrapText(help, contentWidth)))
 	return center(m.width, m.height, b.String())
@@ -1029,7 +1042,10 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footerText := fmt.Sprintf("%s  •  C compare  R refresh  d diagnostics  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footerText := fmt.Sprintf("%s  •  j/k move  •  enter inspect  •  / filter  •  ? help  •  q quit", position)
+	if m.filtering {
+		footerText = "enter apply filter  •  esc clear  •  ? help"
+	}
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)
@@ -1130,11 +1146,10 @@ func (m *Model) renderRecordRow(item reddit.Item, selected, showAuthor bool) str
 func (m *Model) viewDetail() string {
 	width := max(1, m.width-4)
 	header := logoStyle.Render(truncate("THIS YOU?  /  RECORD", width))
-	help := "j/k or arrows scroll  •  esc/backspace return"
+	help := "j/k scroll  •  b save  •  o open  •  ? help  •  esc return"
 	if width < 48 {
-		help = "j/k scroll  •  esc return"
+		help = "j/k  •  ? help  •  esc"
 	}
-	help = "b bookmark  o open  y copy  •  " + help
 	footer := truncate(m.actionFooter(help), width)
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.detail.View(), footer)
 	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
@@ -1144,9 +1159,9 @@ func (m *Model) viewDetail() string {
 func (m *Model) viewSummary() string {
 	width := max(1, m.width-4)
 	header := logoStyle.Render(truncate("THIS YOU?  /  PROFILE SUMMARY", width))
-	help := "j/k or arrows scroll  •  g/G jump  •  esc/backspace return"
+	help := "j/k scroll  •  ? help  •  esc return"
 	if width < 48 {
-		help = "j/k scroll  •  esc return"
+		help = "j/k  •  ? help  •  esc"
 	}
 	footer := mutedStyle.Render(truncate(help, width))
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.summary.View(), footer)
@@ -1157,9 +1172,9 @@ func (m *Model) viewSummary() string {
 func (m *Model) viewDiagnostics() string {
 	width := max(1, m.width-4)
 	header := logoStyle.Render(truncate("THIS YOU?  /  ARCHIVE DIAGNOSTICS", width))
-	help := "j/k or arrows scroll  •  g/G jump  •  esc/backspace return"
+	help := "j/k scroll  •  ? help  •  esc return"
 	if width < 48 {
-		help = "j/k scroll  •  esc return"
+		help = "j/k  •  ? help  •  esc"
 	}
 	footer := mutedStyle.Render(truncate(help, width))
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.diagnostics.View(), footer)

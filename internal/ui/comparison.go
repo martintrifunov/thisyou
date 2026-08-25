@@ -272,7 +272,7 @@ func (m *Model) viewCompareInput() string {
 	if m.compareErr != "" {
 		b.WriteString("\n" + errorStyle.Render(wrapText(m.compareErr, contentWidth)))
 	}
-	b.WriteString(gap + mutedStyle.Render(wrapText("enter compare  •  esc return  •  ctrl+c quit", contentWidth)))
+	b.WriteString(gap + mutedStyle.Render(wrapText("enter compare  •  ? help  •  esc return", contentWidth)))
 	return center(m.width, m.height, b.String())
 }
 
@@ -315,9 +315,9 @@ func (m *Model) viewCompareLoading() string {
 func (m *Model) viewComparison() string {
 	width := max(1, m.width-4)
 	header := logoStyle.Render(truncate("THIS YOU?  /  PROFILE COMPARISON", width))
-	help := "j/k or arrows scroll  •  g/G jump  •  C compare another  •  esc return"
+	help := "j/k scroll  •  C new comparison  •  ? help  •  esc return"
 	if width < 48 {
-		help = "j/k scroll  •  C new  •  esc return"
+		help = "j/k  •  C new  •  ? help  •  esc"
 	}
 	footer := truncate(m.actionFooter(help), width)
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.comparison.View(), footer)

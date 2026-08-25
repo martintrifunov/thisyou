@@ -185,7 +185,7 @@ func (m *Model) viewBookmarks() string {
 	if len(m.saved) > 0 {
 		position = fmt.Sprintf("%d/%d", m.bookmarkSelected+1, len(m.saved))
 	}
-	footerText := fmt.Sprintf("%s  •  b remove  enter inspect  o open  y copy  esc return", position)
+	footerText := fmt.Sprintf("%s  •  j/k move  •  enter inspect  •  b remove  •  ? help  •  esc return", position)
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)
