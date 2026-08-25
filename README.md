@@ -71,6 +71,10 @@ After pressing `y`, use `u` for the Reddit URL, `t` for record text, `a` for
 the author, `s` for the subreddit, or `l` for the linked URL. Press `esc` to
 close the copy menu.
 
+URLs in an inspected record are clickable terminal links. Ctrl-click them to
+open a browser tab; some macOS terminals use Cmd-click instead. The `o` key
+remains available when terminal hyperlinks are unsupported.
+
 ## How retrieval works
 
 Four crawlers run concurrently:

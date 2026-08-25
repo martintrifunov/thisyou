@@ -3,9 +3,11 @@ package ui
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -53,6 +55,7 @@ var (
 	titleStyle    = lipgloss.NewStyle().Foreground(foreground).Bold(true)
 	mutedStyle    = lipgloss.NewStyle().Foreground(muted)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
+	linkStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#4da6ff")).Underline(true)
 	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Background(lipgloss.Color("#272729"))
 )
 
@@ -759,12 +762,44 @@ func renderDetail(item reddit.Item, width int) string {
 		b.WriteString(wrapText(item.Body, textWidth))
 	}
 	if link := item.RedditURL(); link != "" {
-		b.WriteString("\n\n" + mutedStyle.Render("Reddit URL:") + "\n" + wrapText(link, textWidth))
+		b.WriteString("\n\n" + mutedStyle.Render("Reddit URL:") + "\n" + renderLink(link, textWidth))
 	}
 	if item.URL != "" && item.URL != item.RedditURL() {
-		b.WriteString("\n\n" + mutedStyle.Render("Linked URL:") + "\n" + wrapText(item.URL, textWidth))
+		b.WriteString("\n\n" + mutedStyle.Render("Linked URL:") + "\n" + renderLink(item.URL, textWidth))
 	}
 	return b.String()
+}
+
+func renderLink(value string, width int) string {
+	target, ok := safeWebURL(value)
+	if !ok {
+		value = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, value)
+		return wrapText(value, width)
+	}
+	link := ansi.SetHyperlink(target) + linkStyle.Render(target) + ansi.ResetHyperlink()
+	return wrapText(link, width)
+}
+
+func safeWebURL(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" {
+		return "", false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return parsed.String(), true
+	default:
+		return "", false
+	}
 }
 
 func center(width, height int, content string) string {

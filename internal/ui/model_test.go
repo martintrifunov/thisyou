@@ -31,6 +31,55 @@ func TestWrapTextPreservesParagraphs(t *testing.T) {
 	}
 }
 
+func TestRenderLinkCreatesWrappedHyperlink(t *testing.T) {
+	t.Parallel()
+	target := "https://example.com/a/long/path?with=query"
+	got := renderLink(target, 16)
+	if !strings.Contains(got, ansi.SetHyperlink(target)) {
+		t.Fatalf("rendered link does not contain hyperlink target: %q", got)
+	}
+	if !strings.Contains(got, ansi.ResetHyperlink()) {
+		t.Fatalf("rendered link does not reset hyperlink: %q", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if ansi.StringWidth(line) > 16 {
+			t.Fatalf("line %q exceeds link width", line)
+		}
+	}
+}
+
+func TestRenderLinkRejectsUnsafeTargets(t *testing.T) {
+	t.Parallel()
+	for _, target := range []string{
+		"javascript:alert(1)",
+		"file:///etc/passwd",
+		"https://example.com/\x1b]8;;https://attacker.example",
+		"/relative/path",
+	} {
+		t.Run(target, func(t *testing.T) {
+			got := renderLink(target, 80)
+			if strings.Contains(got, "\x1b]8;") {
+				t.Fatalf("unsafe target %q was rendered as a hyperlink", target)
+			}
+		})
+	}
+}
+
+func TestDetailRendersClickableURLs(t *testing.T) {
+	t.Parallel()
+	item := reddit.Item{
+		Kind:      reddit.Post,
+		Permalink: "/r/golang/comments/example/post",
+		URL:       "https://go.dev/doc/",
+	}
+	got := renderDetail(item, 80)
+	for _, target := range []string{item.RedditURL(), item.URL} {
+		if !strings.Contains(got, ansi.SetHyperlink(target)) {
+			t.Fatalf("detail does not contain hyperlink for %q", target)
+		}
+	}
+}
+
 func TestSearchViewFitsAndFillsSmallWindow(t *testing.T) {
 	m := New(nil)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 36, Height: 16})
