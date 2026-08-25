@@ -191,6 +191,29 @@ func TestLongSelectedRowsKeepFixedHeight(t *testing.T) {
 	}
 }
 
+func TestSelectedRowsDoNotApplyBackgroundStyleToEmoji(t *testing.T) {
+	m := New(nil)
+	m.screen = resultsScreen
+	m.username = "example"
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	for _, emoji := range []string{"❤️", "❤", "⭐", "🏳️‍🌈", "👨‍👩‍👧‍👦"} {
+		if !isEmojiCluster(emoji) {
+			t.Fatalf("emoji cluster %q was not recognized", emoji)
+		}
+		item := reddit.Item{Kind: reddit.Comment, ID: emoji, Body: "thanks " + emoji}
+		rendered := m.renderRow(item, true)
+		if !strings.Contains(rendered, emoji) {
+			t.Fatalf("selected row split emoji %q: %q", emoji, rendered)
+		}
+		if got := lipgloss.Height(rendered); got != 2 {
+			t.Fatalf("selected row height = %d, want 2", got)
+		}
+		if got, want := lipgloss.Width(rendered), 56; got != want {
+			t.Fatalf("selected row width = %d, want %d", got, want)
+		}
+	}
+}
+
 func TestResultsViewFitsWithFilterAndError(t *testing.T) {
 	m := New(nil)
 	m.screen = resultsScreen

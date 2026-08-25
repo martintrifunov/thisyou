@@ -813,20 +813,59 @@ func (m *Model) renderRecordRow(item reddit.Item, selected, showAuthor bool) str
 	if contentWidth > 2 {
 		body = "  " + truncate(headline, contentWidth-2)
 	}
+	bookmarked := m.isBookmarked(item)
+	if selected {
+		marker := "┃"
+		if bookmarked {
+			marker = "★"
+		}
+		marker = logoStyle.Render(marker)
+		return marker + renderSelectedLine(meta, contentWidth) + "\n" + marker + renderSelectedLine(body, contentWidth)
+	}
 	content := truncate(meta, contentWidth) + "\n" + body
 	style := lipgloss.NewStyle().Width(contentWidth).Height(2).Foreground(foreground)
 	marker := " \n "
-	bookmarked := m.isBookmarked(item)
 	if bookmarked {
 		marker = logoStyle.Render("★\n★")
 	}
-	if selected {
-		style = style.Inherit(selectedStyle)
-		if !bookmarked {
-			marker = logoStyle.Render("┃\n┃")
+	return lipgloss.JoinHorizontal(lipgloss.Top, marker, style.Render(content))
+}
+
+func renderSelectedLine(value string, width int) string {
+	value = truncate(value, width)
+	var b strings.Builder
+	normalStart := 0
+	for offset := 0; offset < len(value); {
+		cluster, _ := ansi.FirstGraphemeCluster(value[offset:], ansi.GraphemeWidth)
+		next := offset + len(cluster)
+		if isEmojiCluster(cluster) {
+			if normalStart < offset {
+				b.WriteString(selectedStyle.Render(value[normalStart:offset]))
+			}
+			b.WriteString(cluster)
+			normalStart = next
+		}
+		offset = next
+	}
+	if normalStart < len(value) {
+		b.WriteString(selectedStyle.Render(value[normalStart:]))
+	}
+	if padding := width - ansi.StringWidth(value); padding > 0 {
+		b.WriteString(selectedStyle.Render(strings.Repeat(" ", padding)))
+	}
+	return b.String()
+}
+
+func isEmojiCluster(cluster string) bool {
+	for _, r := range cluster {
+		switch {
+		case r == '\u200d', r == '\ufe0f', r == '\u20e3':
+			return true
+		case unicode.Is(unicode.So, r):
+			return true
 		}
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, marker, style.Render(content))
+	return false
 }
 
 func (m *Model) viewDetail() string {
