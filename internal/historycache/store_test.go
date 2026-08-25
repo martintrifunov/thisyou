@@ -3,6 +3,7 @@ package historycache
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func TestStoreSavesAndLoadsSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("cache permissions = %o, want 600", info.Mode().Perm())
 	}
 }
