@@ -1,0 +1,27 @@
+name: Windows
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        shell: powershell
+        run: .\build.ps1 -Task Test
+      - name: Build
+        shell: powershell
+        run: .\build.ps1 -Task Build
+      - name: Verify executable
+        shell: powershell
+        run: .\thisyou.exe --version
