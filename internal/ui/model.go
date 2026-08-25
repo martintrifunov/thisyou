@@ -91,6 +91,7 @@ type Model struct {
 	comments []reddit.Item
 	visible  []reddit.Item
 	tab      tab
+	ordering sortMode
 	selected int
 	offset   int
 
@@ -398,6 +399,11 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "s":
 		m.openSummary()
+	case "S":
+		m.ordering = m.ordering.next()
+		m.refreshVisible()
+		m.notice = "sort: " + strings.ToLower(m.ordering.label())
+		m.noticeError = false
 	case "B":
 		return m, m.openBookmarks()
 	case "b":
@@ -487,6 +493,7 @@ func (m *Model) beginSearch() tea.Cmd {
 	m.filter.SetValue("")
 	m.filter.Blur()
 	m.tab = allTab
+	m.ordering = newestFirst
 	m.selected, m.offset = 0, 0
 	m.events = make(chan searchEvent, 128)
 	ch := m.events
@@ -528,14 +535,13 @@ func (m *Model) refreshVisible() {
 	var source []reddit.Item
 	switch m.tab {
 	case postsTab:
-		source = m.posts
+		source = append([]reddit.Item(nil), m.posts...)
 	case commentsTab:
-		source = m.comments
+		source = append([]reddit.Item(nil), m.comments...)
 	default:
 		source = make([]reddit.Item, 0, len(m.posts)+len(m.comments))
 		source = append(source, m.posts...)
 		source = append(source, m.comments...)
-		sort.SliceStable(source, func(i, j int) bool { return source[i].CreatedUTC > source[j].CreatedUTC })
 	}
 	filter, err := parseResultFilter(m.filter.Value())
 	if err != nil {
@@ -553,6 +559,7 @@ func (m *Model) refreshVisible() {
 			}
 		}
 	}
+	sortItems(m.visible, m.ordering)
 	m.selected, m.offset = 0, 0
 }
 
@@ -722,7 +729,7 @@ func (m *Model) viewLoading() string {
 func (m *Model) viewResults() string {
 	var b strings.Builder
 	contentWidth := max(4, m.width-4)
-	header := truncate(fmt.Sprintf("THIS YOU?  /  u/%s", m.username), contentWidth)
+	header := truncate(fmt.Sprintf("THIS YOU?  /  u/%s  /  %s", m.username, m.ordering.label()), contentWidth)
 	b.WriteString(logoStyle.Render(header))
 	b.WriteString("\n")
 	b.WriteString(m.renderTabs())
@@ -751,7 +758,7 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footerText := fmt.Sprintf("%s  •  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footerText := fmt.Sprintf("%s  •  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)

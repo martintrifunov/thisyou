@@ -58,6 +58,7 @@ thisyou --version
 | `tab`, `shift+tab` | Switch All, Posts, and Comments |
 | `enter` | Open the complete archived record |
 | `s` | Open the profile summary |
+| `S` | Cycle newest, oldest, top-score, and subreddit sorting |
 | `b` | Save or remove a bookmark |
 | `B` | Open saved bookmarks from results |
 | `ctrl+b` | Open saved bookmarks from the username screen |
