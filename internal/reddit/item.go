@@ -3,6 +3,7 @@ package reddit
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -35,13 +36,31 @@ type Item struct {
 func (i Item) Time() time.Time { return time.Unix(i.CreatedUTC, 0) }
 
 func (i Item) RedditURL() string {
-	if strings.HasPrefix(i.Permalink, "http://") || strings.HasPrefix(i.Permalink, "https://") {
-		return i.Permalink
+	permalink := strings.TrimSpace(i.Permalink)
+	if permalink == "" {
+		return ""
 	}
-	if i.Permalink != "" {
-		return "https://www.reddit.com" + "/" + strings.TrimPrefix(i.Permalink, "/")
+	parsed, err := url.Parse(permalink)
+	if err != nil {
+		return ""
 	}
-	return ""
+	if !parsed.IsAbs() {
+		permalink = "https://www.reddit.com/" + strings.TrimPrefix(permalink, "/")
+		parsed, err = url.Parse(permalink)
+		if err != nil {
+			return ""
+		}
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "reddit.com" && !strings.HasSuffix(host, ".reddit.com") && host != "redd.it" && !strings.HasSuffix(host, ".redd.it") {
+		return ""
+	}
+	parsed.Scheme = "https"
+	return parsed.String()
 }
 
 type archiveItem struct {

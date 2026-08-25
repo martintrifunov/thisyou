@@ -63,7 +63,9 @@ type searchEvent struct {
 }
 
 type Model struct {
-	client *reddit.Client
+	client   *reddit.Client
+	openURL  func(string) error
+	copyText func(string) error
 
 	screen   screen
 	width    int
@@ -82,14 +84,17 @@ type Model struct {
 	selected int
 	offset   int
 
-	filtering bool
-	status    map[string]reddit.Progress
-	errors    []error
-	searchErr string
-	events    chan searchEvent
-	cancel    context.CancelFunc
-	searchID  uint64
-	inspected *reddit.Item
+	filtering   bool
+	status      map[string]reddit.Progress
+	errors      []error
+	searchErr   string
+	events      chan searchEvent
+	cancel      context.CancelFunc
+	searchID    uint64
+	inspected   *reddit.Item
+	copying     bool
+	notice      string
+	noticeError bool
 }
 
 func New(client *reddit.Client) *Model {
@@ -117,13 +122,15 @@ func New(client *reddit.Client) *Model {
 	spin.Style = lipgloss.NewStyle().Foreground(orange)
 
 	return &Model{
-		client:  client,
-		screen:  searchScreen,
-		input:   in,
-		filter:  filter,
-		spinner: spin,
-		detail:  viewport.New(80, 20),
-		status:  make(map[string]reddit.Progress),
+		client:   client,
+		openURL:  openInBrowser,
+		copyText: copyToClipboard,
+		screen:   searchScreen,
+		input:    in,
+		filter:   filter,
+		spinner:  spin,
+		detail:   viewport.New(80, 20),
+		status:   make(map[string]reddit.Progress),
 	}
 }
 
@@ -160,6 +167,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshVisible()
 			return m, nil
 		}
+	case actionMsg:
+		m.copying = false
+		if msg.err != nil {
+			m.setActionError(actionError(msg.err))
+		} else {
+			m.notice = msg.success
+			m.noticeError = false
+		}
+		return m, nil
 	case spinner.TickMsg:
 		if m.screen == loadingScreen {
 			var cmd tea.Cmd
@@ -255,6 +271,18 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if m.copying {
+		if len(m.visible) == 0 {
+			m.copying = false
+			m.setActionError("no record selected")
+			return m, nil
+		}
+		return m, m.updateCopyMenu(key.String(), m.visible[m.selected])
+	}
+	if key.String() != "o" && key.String() != "y" {
+		m.notice = ""
+		m.noticeError = false
+	}
 	switch key.String() {
 	case "q":
 		return m, tea.Quit
@@ -302,17 +330,49 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.visible) > 0 {
 			m.openDetail(m.visible[m.selected])
 		}
+	case "o":
+		if len(m.visible) > 0 {
+			return m, m.openItem(m.visible[m.selected])
+		}
+		m.setActionError("no record selected")
+	case "y":
+		if len(m.visible) > 0 {
+			m.copying = true
+			m.notice = ""
+			m.noticeError = false
+		} else {
+			m.setActionError("no record selected")
+		}
 	}
 	return m, nil
 }
 
 func (m *Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
+		if m.copying && m.inspected != nil {
+			return m, m.updateCopyMenu(key.String(), *m.inspected)
+		}
+		if key.String() != "o" && key.String() != "y" {
+			m.notice = ""
+			m.noticeError = false
+		}
 		switch key.String() {
 		case "esc", "backspace", "q":
 			m.screen = resultsScreen
 			m.inspected = nil
+			m.copying = false
 			return m, nil
+		case "o":
+			if m.inspected != nil {
+				return m, m.openItem(*m.inspected)
+			}
+		case "y":
+			if m.inspected != nil {
+				m.copying = true
+				m.notice = ""
+				m.noticeError = false
+				return m, nil
+			}
 		}
 	}
 	var cmd tea.Cmd
@@ -334,6 +394,9 @@ func (m *Model) beginSearch() tea.Cmd {
 	m.errors = nil
 	m.posts, m.comments, m.visible = nil, nil, nil
 	m.inspected = nil
+	m.copying = false
+	m.notice = ""
+	m.noticeError = false
 	m.filtering = false
 	m.filter.SetValue("")
 	m.filter.Blur()
@@ -434,6 +497,9 @@ func (m *Model) pageRows() int {
 func (m *Model) openDetail(item reddit.Item) {
 	m.screen = detailScreen
 	m.inspected = &item
+	m.copying = false
+	m.notice = ""
+	m.noticeError = false
 	m.resizeDetail()
 	m.detail.GotoTop()
 }
@@ -568,10 +634,8 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footer := mutedStyle.Render(truncate(
-		fmt.Sprintf("%s  •  j/k move  enter inspect  tab view  / filter  r new search  q quit", position),
-		max(10, m.width-4),
-	))
+	footerText := fmt.Sprintf("%s  •  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)
 	spacer := max(0, innerHeight-lipgloss.Height(body)-lipgloss.Height(footer))
@@ -655,7 +719,8 @@ func (m *Model) viewDetail() string {
 	if width < 48 {
 		help = "j/k scroll  •  esc return"
 	}
-	footer := mutedStyle.Render(truncate(help, width))
+	help = "o open  y copy  •  " + help
+	footer := truncate(m.actionFooter(help), width)
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.detail.View(), footer)
 	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
 	return fillScreen(m.width, m.height, framed, lipgloss.Left, lipgloss.Top)

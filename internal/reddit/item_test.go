@@ -24,6 +24,31 @@ func TestRedditURL(t *testing.T) {
 			want: "https://old.reddit.com/r/golang/comments/abc",
 		},
 		{
+			name: "http permalink is upgraded",
+			item: Item{Permalink: "http://reddit.com/r/golang/comments/abc"},
+			want: "https://reddit.com/r/golang/comments/abc",
+		},
+		{
+			name: "short Reddit permalink",
+			item: Item{Permalink: "https://redd.it/abc"},
+			want: "https://redd.it/abc",
+		},
+		{
+			name: "external permalink is rejected",
+			item: Item{Permalink: "https://example.com/r/golang/comments/abc"},
+			want: "",
+		},
+		{
+			name: "lookalike permalink is rejected",
+			item: Item{Permalink: "https://reddit.com.example.com/r/golang/comments/abc"},
+			want: "",
+		},
+		{
+			name: "non-web scheme is rejected",
+			item: Item{Permalink: "javascript:alert(1)"},
+			want: "",
+		},
+		{
 			name: "external URL is not a Reddit URL",
 			item: Item{URL: "https://example.com/article"},
 			want: "",

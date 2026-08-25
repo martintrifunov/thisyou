@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -208,6 +209,113 @@ func TestEmptyResultsNavigationKeepsValidSelection(t *testing.T) {
 	}
 }
 
+func TestOpenSelectedRecord(t *testing.T) {
+	m := New(nil)
+	m.screen = resultsScreen
+	m.posts = []reddit.Item{{
+		Kind: reddit.Post, ID: "one", Permalink: "/r/golang/comments/one/example",
+	}}
+	m.refreshVisible()
+	var opened string
+	m.openURL = func(value string) error {
+		opened = value
+		return nil
+	}
+
+	_, command := m.Update(runeKey("o"))
+	if command == nil {
+		t.Fatal("open action returned no command")
+	}
+	_, _ = m.Update(command())
+	if got, want := opened, "https://www.reddit.com/r/golang/comments/one/example"; got != want {
+		t.Fatalf("opened URL = %q, want %q", got, want)
+	}
+	if m.notice != "opened Reddit URL" || m.noticeError {
+		t.Fatalf("open notice = %q, error = %v", m.notice, m.noticeError)
+	}
+}
+
+func TestOpenRejectsUnsafePermalink(t *testing.T) {
+	m := New(nil)
+	m.screen = resultsScreen
+	m.posts = []reddit.Item{{Kind: reddit.Post, ID: "one", Permalink: "https://example.com/phishing"}}
+	m.refreshVisible()
+	called := false
+	m.openURL = func(string) error {
+		called = true
+		return nil
+	}
+
+	_, command := m.Update(runeKey("o"))
+	if command != nil || called {
+		t.Fatal("unsafe permalink was opened")
+	}
+	if !m.noticeError || m.notice != "no safe Reddit URL available" {
+		t.Fatalf("open notice = %q, error = %v", m.notice, m.noticeError)
+	}
+}
+
+func TestCopyMenuCopiesRecordFields(t *testing.T) {
+	item := reddit.Item{
+		Kind: reddit.Post, Title: "Example title", Body: "Example body", Author: "alice",
+		Subreddit: "golang", Permalink: "/r/golang/comments/one/example", URL: "https://go.dev",
+	}
+	tests := map[string]string{
+		"u": "https://www.reddit.com/r/golang/comments/one/example",
+		"t": "Example title\n\nExample body",
+		"a": "u/alice",
+		"s": "r/golang",
+		"l": "https://go.dev",
+	}
+	for choice, want := range tests {
+		t.Run(choice, func(t *testing.T) {
+			m := New(nil)
+			m.screen = resultsScreen
+			m.posts = []reddit.Item{item}
+			m.refreshVisible()
+			var copied string
+			m.copyText = func(value string) error {
+				copied = value
+				return nil
+			}
+
+			_, _ = m.Update(runeKey("y"))
+			if !m.copying {
+				t.Fatal("copy menu did not open")
+			}
+			_, command := m.Update(runeKey(choice))
+			if command == nil {
+				t.Fatal("copy action returned no command")
+			}
+			_, _ = m.Update(command())
+			if copied != want {
+				t.Fatalf("copied value = %q, want %q", copied, want)
+			}
+			if m.noticeError || !strings.HasPrefix(m.notice, "copied ") {
+				t.Fatalf("copy notice = %q, error = %v", m.notice, m.noticeError)
+			}
+		})
+	}
+}
+
+func TestActionFailureIsDisplayed(t *testing.T) {
+	m := New(nil)
+	m.screen = detailScreen
+	item := reddit.Item{Kind: reddit.Comment, Body: "text"}
+	m.inspected = &item
+	m.copyText = func(string) error { return errors.New("clipboard unavailable") }
+
+	_, _ = m.Update(runeKey("y"))
+	_, command := m.Update(runeKey("t"))
+	if command == nil {
+		t.Fatal("copy action returned no command")
+	}
+	_, _ = m.Update(command())
+	if !m.noticeError || m.notice != "action failed: clipboard unavailable" {
+		t.Fatalf("copy notice = %q, error = %v", m.notice, m.noticeError)
+	}
+}
+
 func TestEveryScreenFitsCommonTerminalSizes(t *testing.T) {
 	sizes := []tea.WindowSizeMsg{
 		{Width: 20, Height: 12},
@@ -244,10 +352,14 @@ func TestEveryScreenFitsCommonTerminalSizes(t *testing.T) {
 			results.refreshVisible()
 			_, _ = results.Update(size)
 			assertViewSize(t, results.View(), size.Width, size.Height)
+			results.copying = true
+			assertViewSize(t, results.View(), size.Width, size.Height)
 
 			detail := New(nil)
 			_, _ = detail.Update(size)
 			detail.openDetail(reddit.Item{Kind: reddit.Comment, Body: strings.Repeat("long comment 🚀 ", 30), CreatedUTC: 1})
+			assertViewSize(t, detail.View(), size.Width, size.Height)
+			detail.copying = true
 			assertViewSize(t, detail.View(), size.Width, size.Height)
 		})
 	}
@@ -265,4 +377,8 @@ func assertViewSize(t *testing.T, view string, width, height int) {
 	if got := lipgloss.Height(view); got != height {
 		t.Fatalf("view height = %d, want %d", got, height)
 	}
+}
+
+func runeKey(value string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
 }

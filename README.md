@@ -57,6 +57,8 @@ thisyou --version
 | `j` / `k`, arrows | Move through history |
 | `tab`, `shift+tab` | Switch All, Posts, and Comments |
 | `enter` | Open the complete archived record |
+| `o` | Open the selected record on Reddit |
+| `y` | Copy the record URL, text, author, subreddit, or linked URL |
 | `/` | Filter the current view |
 | `g` / `G` | Jump to first / last result |
 | `page up` / `page down` | Move by one screen |
@@ -64,6 +66,10 @@ thisyou --version
 | `esc` | Cancel a crawl or close a record |
 | `q` | Quit from results; close an inspected record |
 | `ctrl+c` | Quit from any screen |
+
+After pressing `y`, use `u` for the Reddit URL, `t` for record text, `a` for
+the author, `s` for the subreddit, or `l` for the linked URL. Press `esc` to
+close the copy menu.
 
 ## How retrieval works
 
