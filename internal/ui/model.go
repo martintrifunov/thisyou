@@ -39,6 +39,7 @@ const (
 	detailScreen
 	summaryScreen
 	bookmarksScreen
+	diagnosticsScreen
 )
 
 type tab int
@@ -98,6 +99,7 @@ type Model struct {
 	refreshing   bool
 	detail       viewport.Model
 	summary      viewport.Model
+	diagnostics  viewport.Model
 
 	posts    []reddit.Item
 	comments []reddit.Item
@@ -116,21 +118,26 @@ type Model struct {
 	bookmarksLoading bool
 	bookmarkRequest  uint64
 
-	filtering   bool
-	filterErr   string
-	status      map[string]reddit.Progress
-	errors      []error
-	searchErr   string
-	events      chan searchEvent
-	cancel      context.CancelFunc
-	searchID    uint64
-	inspected   *reddit.Item
-	copying     bool
-	notice      string
-	noticeError bool
-	fromCache   bool
-	cachedAt    time.Time
-	refreshBase searchResult
+	filtering     bool
+	filterErr     string
+	status        map[string]reddit.Progress
+	errors        []error
+	searchErr     string
+	events        chan searchEvent
+	cancel        context.CancelFunc
+	searchID      uint64
+	inspected     *reddit.Item
+	copying       bool
+	notice        string
+	noticeError   bool
+	fromCache     bool
+	cachedAt      time.Time
+	refreshBase   searchResult
+	diagnosticRun string
+	refreshStatus map[string]reddit.Progress
+	refreshRun    string
+	refreshCached bool
+	refreshAt     time.Time
 }
 
 func New(client *reddit.Client) *Model {
@@ -169,6 +176,7 @@ func New(client *reddit.Client) *Model {
 		spinner:      spin,
 		detail:       viewport.New(80, 20),
 		summary:      viewport.New(80, 20),
+		diagnostics:  viewport.New(80, 20),
 		status:       make(map[string]reddit.Progress),
 		bookmarkIDs:  make(map[string]struct{}),
 		detailReturn: resultsScreen,
@@ -185,6 +193,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filter.Width = max(4, msg.Width-10)
 		m.resizeDetail()
 		m.resizeSummary()
+		m.resizeDiagnostics()
 		m.ensureVisible()
 		return m, nil
 	case searchEvent:
@@ -289,6 +298,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSummary(msg)
 	case bookmarksScreen:
 		return m.updateBookmarks(msg)
+	case diagnosticsScreen:
+		return m.updateDiagnosticsScreen(msg)
 	default:
 		return m, nil
 	}
@@ -338,6 +349,10 @@ func (m *Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.posts = m.refreshBase.Posts
 			m.comments = m.refreshBase.Comments
 			m.errors = m.refreshBase.Errors
+			m.status = m.refreshStatus
+			m.diagnosticRun = m.refreshRun
+			m.fromCache = m.refreshCached
+			m.cachedAt = m.refreshAt
 			m.refreshing = false
 			m.screen = resultsScreen
 			m.refreshVisible()
@@ -462,6 +477,8 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.noticeError = false
 	case "R":
 		return m, m.beginRefresh()
+	case "d":
+		m.openDiagnostics()
 	case "B":
 		return m, m.openBookmarks()
 	case "b":
@@ -529,11 +546,31 @@ func (m *Model) updateSummary(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) updateDiagnosticsScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "esc", "backspace", "q", "d":
+			m.screen = resultsScreen
+			return m, nil
+		case "g", "home":
+			m.diagnostics.GotoTop()
+			return m, nil
+		case "G", "end":
+			m.diagnostics.GotoBottom()
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.diagnostics, cmd = m.diagnostics.Update(msg)
+	return m, cmd
+}
+
 func (m *Model) beginSearch() tea.Cmd {
 	m.prepareSearch()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.loadingCache = false
+	m.diagnosticRun = "full crawl"
 	searchID := m.searchID
 	m.events = make(chan searchEvent, 128)
 	ch := m.events
@@ -572,11 +609,20 @@ func (m *Model) beginRefresh() tea.Cmd {
 		Comments: append([]reddit.Item(nil), m.comments...),
 		Errors:   append([]error(nil), m.errors...),
 	}
+	previousStatus := cloneStatus(m.status)
+	previousRun := m.diagnosticRun
+	previousCached := m.fromCache
+	previousAt := m.cachedAt
 	postsAfter := latestTimestamp(base.Posts)
 	commentsAfter := latestTimestamp(base.Comments)
 	m.prepareSearch()
 	m.refreshing = true
 	m.refreshBase = base
+	m.refreshStatus = previousStatus
+	m.refreshRun = previousRun
+	m.refreshCached = previousCached
+	m.refreshAt = previousAt
+	m.diagnosticRun = "incremental refresh"
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	searchID := m.searchID
@@ -621,6 +667,14 @@ func latestTimestamp(items []reddit.Item) int64 {
 		}
 	}
 	return latest
+}
+
+func cloneStatus(status map[string]reddit.Progress) map[string]reddit.Progress {
+	cloned := make(map[string]reddit.Progress, len(status))
+	for key, value := range status {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (m *Model) prepareSearch() {
@@ -762,6 +816,16 @@ func (m *Model) resizeSummary() {
 	m.summary.SetYOffset(offset)
 }
 
+func (m *Model) resizeDiagnostics() {
+	width := max(1, m.width-4)
+	height := max(1, m.height-4)
+	offset := m.diagnostics.YOffset
+	m.diagnostics.Width = width
+	m.diagnostics.Height = height
+	m.diagnostics.SetContent(renderDiagnostics(m.username, m.diagnosticRun, m.posts, m.comments, m.status, m.errors, width))
+	m.diagnostics.SetYOffset(offset)
+}
+
 func (m *Model) View() string {
 	switch m.screen {
 	case searchScreen:
@@ -776,6 +840,8 @@ func (m *Model) View() string {
 		return m.viewSummary()
 	case bookmarksScreen:
 		return m.viewBookmarks()
+	case diagnosticsScreen:
+		return m.viewDiagnostics()
 	default:
 		return ""
 	}
@@ -907,7 +973,7 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footerText := fmt.Sprintf("%s  •  R refresh  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footerText := fmt.Sprintf("%s  •  R refresh  d diagnostics  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)
@@ -1028,6 +1094,19 @@ func (m *Model) viewSummary() string {
 	}
 	footer := mutedStyle.Render(truncate(help, width))
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.summary.View(), footer)
+	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
+	return fillScreen(m.width, m.height, framed, lipgloss.Left, lipgloss.Top)
+}
+
+func (m *Model) viewDiagnostics() string {
+	width := max(1, m.width-4)
+	header := logoStyle.Render(truncate("THIS YOU?  /  ARCHIVE DIAGNOSTICS", width))
+	help := "j/k or arrows scroll  •  g/G jump  •  esc/backspace return"
+	if width < 48 {
+		help = "j/k scroll  •  esc return"
+	}
+	footer := mutedStyle.Render(truncate(help, width))
+	content := lipgloss.JoinVertical(lipgloss.Left, header, m.diagnostics.View(), footer)
 	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
 	return fillScreen(m.width, m.height, framed, lipgloss.Left, lipgloss.Top)
 }

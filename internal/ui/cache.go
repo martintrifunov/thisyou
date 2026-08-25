@@ -17,6 +17,7 @@ type historyStore interface {
 func (m *Model) beginCachedSearch() tea.Cmd {
 	m.prepareSearch()
 	m.loadingCache = true
+	m.diagnosticRun = "cached history"
 	searchID := m.searchID
 	username := m.username
 	store := m.history

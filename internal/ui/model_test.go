@@ -362,6 +362,45 @@ func TestCancelRefreshRestoresExistingResults(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsShowsCoverageAndFailures(t *testing.T) {
+	t.Parallel()
+	posts := []reddit.Item{
+		{Kind: reddit.Post, Sources: []string{"Arctic Shift", "PullPush"}},
+		{Kind: reddit.Post, Sources: []string{"Arctic Shift"}},
+	}
+	comments := []reddit.Item{{Kind: reddit.Comment, Sources: []string{"PullPush"}}}
+	status := map[string]reddit.Progress{
+		"post:Arctic Shift": {Kind: reddit.Post, Source: "Arctic Shift", Page: 3, Total: 120, Done: true},
+		"comment:PullPush":  {Kind: reddit.Comment, Source: "PullPush", Page: 1, Total: 4, Done: true, Err: errors.New("down")},
+	}
+	got := ansi.Strip(renderDiagnostics("alice", "full crawl", posts, comments, status, []error{errors.New("PullPush comments: down")}, 80))
+	for _, want := range []string{
+		"Last operation: full crawl",
+		"Merged history: 2 posts  •  1 comments  •  3 total",
+		"Arctic Shift  2 posts  •  0 comments",
+		"PullPush      1 posts  •  1 comments",
+		"Arctic Shift posts  •  complete  •  3 page(s)  •  120 fetched",
+		"PullPush comments  •  unavailable",
+		"PARTIAL FAILURES",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diagnostics missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestDiagnosticsViewFillsAndReflows(t *testing.T) {
+	m := New(nil)
+	m.username = "alice"
+	m.posts = []reddit.Item{{Kind: reddit.Post, Sources: []string{"Arctic Shift"}}}
+	m.status["post:Arctic Shift"] = reddit.Progress{Kind: reddit.Post, Source: "Arctic Shift", Page: 2, Total: 101, Done: true}
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.openDiagnostics()
+	assertViewSize(t, m.View(), 80, 24)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 28, Height: 14})
+	assertViewSize(t, m.View(), 28, 14)
+}
+
 func TestEmptyResultsNavigationKeepsValidSelection(t *testing.T) {
 	m := New(nil)
 	m.screen = resultsScreen
@@ -533,6 +572,14 @@ func TestEveryScreenFitsCommonTerminalSizes(t *testing.T) {
 			_, _ = summary.Update(size)
 			summary.openSummary()
 			assertViewSize(t, summary.View(), size.Width, size.Height)
+
+			diagnostics := New(nil)
+			diagnostics.username = "example"
+			diagnostics.posts = []reddit.Item{{Kind: reddit.Post, Sources: []string{"Arctic Shift"}}}
+			diagnostics.status["post:Arctic Shift"] = reddit.Progress{Kind: reddit.Post, Source: "Arctic Shift", Page: 2, Total: 125, Done: true}
+			_, _ = diagnostics.Update(size)
+			diagnostics.openDiagnostics()
+			assertViewSize(t, diagnostics.View(), size.Width, size.Height)
 
 			saved := New(nil)
 			entries := make([]bookmarks.Entry, 12)
