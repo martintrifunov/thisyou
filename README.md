@@ -61,6 +61,7 @@ thisyou --version
 | `S` | Cycle newest, oldest, top-score, and subreddit sorting |
 | `R` | Fetch records newer than the current history |
 | `d` | Open archive coverage and stream diagnostics |
+| `C` | Compare the current profile with another Redditor |
 | `b` | Save or remove a bookmark |
 | `B` | Open saved bookmarks from results |
 | `ctrl+b` | Open saved bookmarks from the username screen |

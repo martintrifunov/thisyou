@@ -40,6 +40,9 @@ const (
 	summaryScreen
 	bookmarksScreen
 	diagnosticsScreen
+	compareInputScreen
+	compareLoadingScreen
+	comparisonScreen
 )
 
 type tab int
@@ -93,6 +96,7 @@ type Model struct {
 	username     string
 	input        textinput.Model
 	filter       textinput.Model
+	compareInput textinput.Model
 	spinner      spinner.Model
 	spinning     bool
 	loadingCache bool
@@ -100,6 +104,7 @@ type Model struct {
 	detail       viewport.Model
 	summary      viewport.Model
 	diagnostics  viewport.Model
+	comparison   viewport.Model
 
 	posts    []reddit.Item
 	comments []reddit.Item
@@ -118,26 +123,33 @@ type Model struct {
 	bookmarksLoading bool
 	bookmarkRequest  uint64
 
-	filtering     bool
-	filterErr     string
-	status        map[string]reddit.Progress
-	errors        []error
-	searchErr     string
-	events        chan searchEvent
-	cancel        context.CancelFunc
-	searchID      uint64
-	inspected     *reddit.Item
-	copying       bool
-	notice        string
-	noticeError   bool
-	fromCache     bool
-	cachedAt      time.Time
-	refreshBase   searchResult
-	diagnosticRun string
-	refreshStatus map[string]reddit.Progress
-	refreshRun    string
-	refreshCached bool
-	refreshAt     time.Time
+	filtering       bool
+	filterErr       string
+	status          map[string]reddit.Progress
+	errors          []error
+	searchErr       string
+	events          chan searchEvent
+	cancel          context.CancelFunc
+	searchID        uint64
+	inspected       *reddit.Item
+	copying         bool
+	notice          string
+	noticeError     bool
+	fromCache       bool
+	cachedAt        time.Time
+	refreshBase     searchResult
+	diagnosticRun   string
+	refreshStatus   map[string]reddit.Progress
+	refreshRun      string
+	refreshCached   bool
+	refreshAt       time.Time
+	compareUsername string
+	compareResult   reddit.Result
+	compareErr      string
+	compareStatus   map[string]reddit.Progress
+	compareEvents   chan compareEvent
+	compareCancel   context.CancelFunc
+	compareID       uint64
 }
 
 func New(client *reddit.Client) *Model {
@@ -160,26 +172,37 @@ func New(client *reddit.Client) *Model {
 	filter.PromptStyle = lipgloss.NewStyle().Foreground(orange)
 	filter.TextStyle = lipgloss.NewStyle().Foreground(foreground)
 
+	compareInput := textinput.New()
+	compareInput.Placeholder = "second redditor username"
+	compareInput.Prompt = "u/"
+	compareInput.CharLimit = 80
+	compareInput.Width = 42
+	compareInput.PromptStyle = lipgloss.NewStyle().Foreground(orange).Bold(true)
+	compareInput.TextStyle = lipgloss.NewStyle().Foreground(foreground)
+
 	spin := spinner.New()
 	spin.Spinner = spinner.Dot
 	spin.Style = lipgloss.NewStyle().Foreground(orange)
 
 	return &Model{
-		client:       client,
-		openURL:      openInBrowser,
-		copyText:     copyToClipboard,
-		store:        bookmarks.NewStore(),
-		history:      historycache.NewStore(),
-		screen:       searchScreen,
-		input:        in,
-		filter:       filter,
-		spinner:      spin,
-		detail:       viewport.New(80, 20),
-		summary:      viewport.New(80, 20),
-		diagnostics:  viewport.New(80, 20),
-		status:       make(map[string]reddit.Progress),
-		bookmarkIDs:  make(map[string]struct{}),
-		detailReturn: resultsScreen,
+		client:        client,
+		openURL:       openInBrowser,
+		copyText:      copyToClipboard,
+		store:         bookmarks.NewStore(),
+		history:       historycache.NewStore(),
+		screen:        searchScreen,
+		input:         in,
+		filter:        filter,
+		compareInput:  compareInput,
+		spinner:       spin,
+		detail:        viewport.New(80, 20),
+		summary:       viewport.New(80, 20),
+		diagnostics:   viewport.New(80, 20),
+		comparison:    viewport.New(80, 20),
+		status:        make(map[string]reddit.Progress),
+		bookmarkIDs:   make(map[string]struct{}),
+		compareStatus: make(map[string]reddit.Progress),
+		detailReturn:  resultsScreen,
 	}
 }
 
@@ -191,9 +214,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.input.Width = max(4, min(42, msg.Width-12))
 		m.filter.Width = max(4, msg.Width-10)
+		m.compareInput.Width = max(4, min(42, msg.Width-12))
 		m.resizeDetail()
 		m.resizeSummary()
 		m.resizeDiagnostics()
+		m.resizeComparison()
 		m.ensureVisible()
 		return m, nil
 	case searchEvent:
@@ -239,6 +264,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+	case compareEvent:
+		return m, m.handleCompareEvent(msg)
 	case actionMsg:
 		m.copying = false
 		if msg.err != nil {
@@ -266,7 +293,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case spinner.TickMsg:
-		if m.screen == loadingScreen {
+		if m.screen == loadingScreen || m.screen == compareLoadingScreen {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -278,6 +305,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if ok && key.String() == "ctrl+c" {
 		if m.cancel != nil {
 			m.cancel()
+		}
+		if m.compareCancel != nil {
+			m.compareCancel()
 		}
 		return m, tea.Quit
 	}
@@ -300,6 +330,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateBookmarks(msg)
 	case diagnosticsScreen:
 		return m.updateDiagnosticsScreen(msg)
+	case compareInputScreen:
+		return m.updateCompareInput(msg)
+	case compareLoadingScreen:
+		return m.updateCompareLoading(msg)
+	case comparisonScreen:
+		return m.updateComparison(msg)
 	default:
 		return m, nil
 	}
@@ -479,6 +515,8 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.beginRefresh()
 	case "d":
 		m.openDiagnostics()
+	case "C":
+		return m, m.openComparisonInput()
 	case "B":
 		return m, m.openBookmarks()
 	case "b":
@@ -842,6 +880,12 @@ func (m *Model) View() string {
 		return m.viewBookmarks()
 	case diagnosticsScreen:
 		return m.viewDiagnostics()
+	case compareInputScreen:
+		return m.viewCompareInput()
+	case compareLoadingScreen:
+		return m.viewCompareLoading()
+	case comparisonScreen:
+		return m.viewComparison()
 	default:
 		return ""
 	}
@@ -973,7 +1017,7 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footerText := fmt.Sprintf("%s  •  R refresh  d diagnostics  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footerText := fmt.Sprintf("%s  •  C compare  R refresh  d diagnostics  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)
