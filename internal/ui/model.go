@@ -85,11 +85,12 @@ type searchEvent struct {
 type searchResult = reddit.Result
 
 type Model struct {
-	client   *reddit.Client
-	openURL  func(string) error
-	copyText func(string) error
-	store    bookmarkStore
-	history  historyStore
+	client        *reddit.Client
+	openURL       func(string) error
+	copyText      func(string) error
+	store         bookmarkStore
+	history       historyStore
+	exportHistory exportWriter
 
 	screen       screen
 	width        int
@@ -137,6 +138,7 @@ type Model struct {
 	searchID        uint64
 	inspected       *reddit.Item
 	copying         bool
+	exporting       bool
 	notice          string
 	noticeError     bool
 	fromCache       bool
@@ -194,6 +196,7 @@ func New(client *reddit.Client) *Model {
 		copyText:      copyToClipboard,
 		store:         bookmarks.NewStore(),
 		history:       historycache.NewStore(),
+		exportHistory: writeExport,
 		screen:        searchScreen,
 		input:         in,
 		filter:        filter,
@@ -275,6 +278,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleCompareEvent(msg)
 	case actionMsg:
 		m.copying = false
+		m.exporting = false
 		if msg.err != nil {
 			m.setActionError(actionError(msg.err))
 		} else {
@@ -454,6 +458,9 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.updateCopyMenu(key.String(), m.visible[m.selected])
 	}
+	if m.exporting {
+		return m, m.updateExportMenu(key.String())
+	}
 	if key.String() != "o" && key.String() != "y" {
 		m.notice = ""
 		m.noticeError = false
@@ -531,6 +538,8 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openDiagnostics()
 	case "C":
 		return m, m.openComparisonInput()
+	case "e":
+		m.openExportMenu()
 	case "B":
 		return m, m.openBookmarks()
 	case "b":
@@ -744,6 +753,7 @@ func (m *Model) prepareSearch() {
 	m.posts, m.comments, m.visible = nil, nil, nil
 	m.inspected = nil
 	m.copying = false
+	m.exporting = false
 	m.notice = ""
 	m.noticeError = false
 	m.filtering = false

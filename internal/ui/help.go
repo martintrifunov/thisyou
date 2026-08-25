@@ -91,6 +91,7 @@ func renderHelp(width int) string {
 			{"B", "Open all saved bookmarks"},
 			{"o", "Open the selected record on Reddit"},
 			{"y", "Copy a URL, text, author, subreddit, or linked URL"},
+			{"e", "Export the current tab, filter, and sort as CSV, JSON, or Markdown"},
 			{"s", "Open the current profile summary"},
 			{"S", "Cycle newest, oldest, score, and subreddit sorting"},
 			{"/", "Filter the current result view"},
