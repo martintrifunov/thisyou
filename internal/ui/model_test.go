@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/maco/thisyou/internal/bookmarks"
 	"github.com/maco/thisyou/internal/reddit"
 )
 
@@ -419,6 +420,16 @@ func TestEveryScreenFitsCommonTerminalSizes(t *testing.T) {
 			_, _ = summary.Update(size)
 			summary.openSummary()
 			assertViewSize(t, summary.View(), size.Width, size.Height)
+
+			saved := New(nil)
+			entries := make([]bookmarks.Entry, 12)
+			for i := range entries {
+				entries[i] = bookmarks.Entry{Item: reddit.Item{Kind: reddit.Comment, ID: fmt.Sprint(i), Body: strings.Repeat("saved comment ", 20)}}
+			}
+			saved.replaceBookmarks(entries)
+			saved.screen = bookmarksScreen
+			_, _ = saved.Update(size)
+			assertViewSize(t, saved.View(), size.Width, size.Height)
 		})
 	}
 }

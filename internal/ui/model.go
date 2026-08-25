@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/maco/thisyou/internal/bookmarks"
 	"github.com/maco/thisyou/internal/reddit"
 )
 
@@ -36,6 +37,7 @@ const (
 	resultsScreen
 	detailScreen
 	summaryScreen
+	bookmarksScreen
 )
 
 type tab int
@@ -70,6 +72,7 @@ type Model struct {
 	client   *reddit.Client
 	openURL  func(string) error
 	copyText func(string) error
+	store    bookmarkStore
 
 	screen   screen
 	width    int
@@ -88,6 +91,15 @@ type Model struct {
 	tab      tab
 	selected int
 	offset   int
+
+	saved            []bookmarks.Entry
+	bookmarkIDs      map[string]struct{}
+	bookmarkSelected int
+	bookmarkOffset   int
+	bookmarkReturn   screen
+	detailReturn     screen
+	bookmarksLoading bool
+	bookmarkRequest  uint64
 
 	filtering   bool
 	status      map[string]reddit.Progress
@@ -127,20 +139,23 @@ func New(client *reddit.Client) *Model {
 	spin.Style = lipgloss.NewStyle().Foreground(orange)
 
 	return &Model{
-		client:   client,
-		openURL:  openInBrowser,
-		copyText: copyToClipboard,
-		screen:   searchScreen,
-		input:    in,
-		filter:   filter,
-		spinner:  spin,
-		detail:   viewport.New(80, 20),
-		summary:  viewport.New(80, 20),
-		status:   make(map[string]reddit.Progress),
+		client:       client,
+		openURL:      openInBrowser,
+		copyText:     copyToClipboard,
+		store:        bookmarks.NewStore(),
+		screen:       searchScreen,
+		input:        in,
+		filter:       filter,
+		spinner:      spin,
+		detail:       viewport.New(80, 20),
+		summary:      viewport.New(80, 20),
+		status:       make(map[string]reddit.Progress),
+		bookmarkIDs:  make(map[string]struct{}),
+		detailReturn: resultsScreen,
 	}
 }
 
-func (m *Model) Init() tea.Cmd { return textinput.Blink }
+func (m *Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.loadBookmarks(true)) }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -183,6 +198,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.noticeError = false
 		}
 		return m, nil
+	case bookmarkMsg:
+		if msg.id != m.bookmarkRequest {
+			return m, nil
+		}
+		m.bookmarksLoading = false
+		if msg.err != nil {
+			if !msg.silent {
+				m.setActionError(actionError(msg.err))
+			}
+		} else {
+			m.replaceBookmarks(msg.entries)
+			if msg.notice != "" {
+				m.notice = msg.notice
+				m.noticeError = false
+			}
+		}
+		return m, nil
 	case spinner.TickMsg:
 		if m.screen == loadingScreen {
 			var cmd tea.Cmd
@@ -199,6 +231,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	}
+	if ok && key.String() == "ctrl+b" && (m.screen == searchScreen || m.screen == resultsScreen) {
+		return m, m.openBookmarks()
+	}
 
 	switch m.screen {
 	case searchScreen:
@@ -211,6 +246,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateDetail(msg)
 	case summaryScreen:
 		return m.updateSummary(msg)
+	case bookmarksScreen:
+		return m.updateBookmarks(msg)
 	default:
 		return m, nil
 	}
@@ -354,6 +391,13 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "s":
 		m.openSummary()
+	case "B":
+		return m, m.openBookmarks()
+	case "b":
+		if len(m.visible) > 0 {
+			return m, m.toggleBookmark(m.visible[m.selected])
+		}
+		m.setActionError("no record selected")
 	}
 	return m, nil
 }
@@ -369,7 +413,7 @@ func (m *Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch key.String() {
 		case "esc", "backspace", "q":
-			m.screen = resultsScreen
+			m.screen = m.detailReturn
 			m.inspected = nil
 			m.copying = false
 			return m, nil
@@ -383,6 +427,10 @@ func (m *Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = ""
 				m.noticeError = false
 				return m, nil
+			}
+		case "b":
+			if m.inspected != nil {
+				return m, m.toggleBookmark(*m.inspected)
 			}
 		}
 	}
@@ -525,6 +573,7 @@ func (m *Model) pageRows() int {
 }
 
 func (m *Model) openDetail(item reddit.Item) {
+	m.detailReturn = m.screen
 	m.screen = detailScreen
 	m.inspected = &item
 	m.copying = false
@@ -574,6 +623,8 @@ func (m *Model) View() string {
 		return m.viewDetail()
 	case summaryScreen:
 		return m.viewSummary()
+	case bookmarksScreen:
+		return m.viewBookmarks()
 	default:
 		return ""
 	}
@@ -602,9 +653,9 @@ func (m *Model) viewSearch() string {
 	if m.searchErr != "" {
 		b.WriteString("\n" + errorStyle.Render(wrapText(m.searchErr, contentWidth)))
 	}
-	help := "enter search  •  ctrl+c quit"
+	help := "enter search  •  ctrl+b bookmarks  •  ctrl+c quit"
 	if m.width < 30 {
-		help = "enter  •  ^c quit"
+		help = "enter  •  ^b saved  •  ^c quit"
 	}
 	b.WriteString(gap + mutedStyle.Render(wrapText(help, contentWidth)))
 	return center(m.width, m.height, b.String())
@@ -682,7 +733,7 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footerText := fmt.Sprintf("%s  •  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footerText := fmt.Sprintf("%s  •  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)
@@ -753,9 +804,15 @@ func (m *Model) renderRow(item reddit.Item, selected bool) string {
 	content := truncate(meta, contentWidth) + "\n" + body
 	style := lipgloss.NewStyle().Width(contentWidth).Height(2).Foreground(foreground)
 	marker := " \n "
+	bookmarked := m.isBookmarked(item)
+	if bookmarked {
+		marker = logoStyle.Render("★\n★")
+	}
 	if selected {
 		style = style.Inherit(selectedStyle)
-		marker = logoStyle.Render("┃\n┃")
+		if !bookmarked {
+			marker = logoStyle.Render("┃\n┃")
+		}
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, marker, style.Render(content))
 }
@@ -767,7 +824,7 @@ func (m *Model) viewDetail() string {
 	if width < 48 {
 		help = "j/k scroll  •  esc return"
 	}
-	help = "o open  y copy  •  " + help
+	help = "b bookmark  o open  y copy  •  " + help
 	footer := truncate(m.actionFooter(help), width)
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.detail.View(), footer)
 	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)

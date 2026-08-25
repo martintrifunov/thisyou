@@ -58,14 +58,17 @@ thisyou --version
 | `tab`, `shift+tab` | Switch All, Posts, and Comments |
 | `enter` | Open the complete archived record |
 | `s` | Open the profile summary |
+| `b` | Save or remove a bookmark |
+| `B` | Open saved bookmarks from results |
+| `ctrl+b` | Open saved bookmarks from the username screen |
 | `o` | Open the selected record on Reddit |
 | `y` | Copy the record URL, text, author, subreddit, or linked URL |
 | `/` | Filter the current view |
 | `g` / `G` | Jump to first / last result |
 | `page up` / `page down` | Move by one screen |
 | `r` | Search another username |
-| `esc` | Cancel a crawl or close a record or summary |
-| `q` | Quit from results; close a record or summary |
+| `esc` | Cancel a crawl or close a record, summary, or bookmarks |
+| `q` | Quit from results; close a record, summary, or bookmarks |
 | `ctrl+c` | Quit from any screen |
 
 After pressing `y`, use `u` for the Reddit URL, `t` for record text, `a` for
@@ -78,6 +81,10 @@ remains available when terminal hyperlinks are unsupported.
 
 The profile summary covers every fetched record regardless of the active tab or
 filter. Scores are archive snapshots and may differ from current Reddit karma.
+
+Bookmarks contain complete archived records and persist between sessions in
+`thisyou/bookmarks.json` inside the operating system's user-config directory.
+The file is written atomically with permissions restricted to the current user.
 
 ## How retrieval works
 
