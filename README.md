@@ -27,11 +27,18 @@ make build
 ./thisyou
 ```
 
-Or install it into your configured Go binary directory:
+Or install it into a binary directory already on your `PATH`:
 
 ```sh
 make install
 thisyou
+```
+
+`make install` uses Homebrew's `bin` directory when Homebrew is available and
+otherwise uses `/usr/local/bin`. Override the destination when needed:
+
+```sh
+make install BINDIR="$HOME/.local/bin"
 ```
 
 Enter a bare username, `u/username`, `@username`, or a Reddit profile URL. No
