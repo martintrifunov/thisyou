@@ -60,7 +60,11 @@ func TestBookmarksOpenFromSearchInspectAndReturn(t *testing.T) {
 	if len(m.saved) != 1 || m.saved[0].Item.ID != item.ID {
 		t.Fatalf("loaded bookmarks = %+v", m.saved)
 	}
-	assertViewSize(t, m.View(), 50, 16)
+	view := m.View()
+	assertViewSize(t, view, 50, 16)
+	if !strings.Contains(ansi.Strip(view), "u/alice") {
+		t.Fatalf("bookmark view does not contain author: %q", ansi.Strip(view))
+	}
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.screen != detailScreen || m.inspected == nil || m.inspected.ID != item.ID {

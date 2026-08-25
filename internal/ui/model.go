@@ -785,6 +785,14 @@ func (m *Model) renderFilterInput() string {
 }
 
 func (m *Model) renderRow(item reddit.Item, selected bool) string {
+	return m.renderRecordRow(item, selected, false)
+}
+
+func (m *Model) renderBookmarkRow(item reddit.Item, selected bool) string {
+	return m.renderRecordRow(item, selected, true)
+}
+
+func (m *Model) renderRecordRow(item reddit.Item, selected, showAuthor bool) string {
 	rowWidth := max(4, m.width-4)
 	contentWidth := max(1, rowWidth-1)
 	kind := "COMMENT"
@@ -796,7 +804,11 @@ func (m *Model) renderRow(item reddit.Item, selected bool) string {
 			headline = clean(item.Body)
 		}
 	}
-	meta := fmt.Sprintf("%-7s  r/%s  •  %s  •  %d points", kind, fallback(item.Subreddit, "unknown"), item.Time().Local().Format("2006-01-02 15:04"), item.Score)
+	context := fmt.Sprintf("%-7s  r/%s", kind, fallback(item.Subreddit, "unknown"))
+	if showAuthor {
+		context = "u/" + fallback(item.Author, "unknown") + "  •  " + context
+	}
+	meta := fmt.Sprintf("%s  •  %s  •  %d points", context, item.Time().Local().Format("2006-01-02 15:04"), item.Score)
 	body := truncate(headline, contentWidth)
 	if contentWidth > 2 {
 		body = "  " + truncate(headline, contentWidth-2)

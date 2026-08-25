@@ -177,7 +177,7 @@ func (m *Model) viewBookmarks() string {
 		rows := m.bookmarkPageRows()
 		end := min(len(m.saved), m.bookmarkOffset+rows)
 		for i := m.bookmarkOffset; i < end; i++ {
-			b.WriteString(m.renderRow(m.saved[i].Item, i == m.bookmarkSelected))
+			b.WriteString(m.renderBookmarkRow(m.saved[i].Item, i == m.bookmarkSelected))
 			b.WriteByte('\n')
 		}
 	}
