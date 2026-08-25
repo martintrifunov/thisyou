@@ -5,14 +5,32 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/maco/thisyou/internal/bookmarks"
+	"github.com/maco/thisyou/internal/historycache"
 	"github.com/maco/thisyou/internal/reddit"
 )
+
+type fakeHistoryStore struct {
+	snapshot historycache.Snapshot
+	found    bool
+	err      error
+	saved    historycache.Snapshot
+}
+
+func (s *fakeHistoryStore) Load(string) (historycache.Snapshot, bool, error) {
+	return s.snapshot, s.found, s.err
+}
+
+func (s *fakeHistoryStore) Save(snapshot historycache.Snapshot) error {
+	s.saved = snapshot
+	return s.err
+}
 
 func TestWrapTextDoesNotExceedWidth(t *testing.T) {
 	t.Parallel()
@@ -266,6 +284,44 @@ func TestStaleSearchEventIsIgnored(t *testing.T) {
 	_, _ = m.Update(searchEvent{id: 1, result: &result})
 	if m.screen != searchScreen || len(m.posts) != 0 {
 		t.Fatalf("stale search event changed model state")
+	}
+}
+
+func TestOpenCachedHistoryOffline(t *testing.T) {
+	savedAt := time.Date(2026, time.August, 25, 12, 30, 0, 0, time.Local)
+	store := &fakeHistoryStore{
+		found: true,
+		snapshot: historycache.Snapshot{
+			Username: "alice",
+			SavedAt:  savedAt,
+			Posts:    []reddit.Item{{Kind: reddit.Post, ID: "cached", Title: "offline result"}},
+		},
+	}
+	m := New(nil)
+	m.history = store
+	m.input.SetValue("alice")
+	_, command := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if command == nil || m.screen != loadingScreen || !m.loadingCache {
+		t.Fatal("offline cache load did not start")
+	}
+	_, _ = m.Update(command())
+	if m.screen != resultsScreen || !m.fromCache || len(m.posts) != 1 {
+		t.Fatalf("cached result state = screen %d, cached %v, posts %d", m.screen, m.fromCache, len(m.posts))
+	}
+	m.width, m.height = 100, 20
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "CACHED 2026-08-25 12:30") {
+		t.Fatalf("cached timestamp missing from view: %q", got)
+	}
+}
+
+func TestOpenMissingCachedHistoryReturnsToSearch(t *testing.T) {
+	m := New(nil)
+	m.history = &fakeHistoryStore{}
+	m.input.SetValue("alice")
+	_, command := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	_, _ = m.Update(command())
+	if m.screen != searchScreen || !strings.Contains(m.searchErr, "no cached history") {
+		t.Fatalf("cache miss state = screen %d, error %q", m.screen, m.searchErr)
 	}
 }
 

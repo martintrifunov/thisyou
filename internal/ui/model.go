@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/maco/thisyou/internal/bookmarks"
+	"github.com/maco/thisyou/internal/historycache"
 	"github.com/maco/thisyou/internal/reddit"
 )
 
@@ -65,27 +66,35 @@ var (
 )
 
 type searchEvent struct {
-	id       uint64
-	progress *reddit.Progress
-	result   *reddit.Result
+	id        uint64
+	progress  *reddit.Progress
+	result    *searchResult
+	err       error
+	cacheErr  error
+	cachedAt  time.Time
+	fromCache bool
 }
+
+type searchResult = reddit.Result
 
 type Model struct {
 	client   *reddit.Client
 	openURL  func(string) error
 	copyText func(string) error
 	store    bookmarkStore
+	history  historyStore
 
-	screen   screen
-	width    int
-	height   int
-	username string
-	input    textinput.Model
-	filter   textinput.Model
-	spinner  spinner.Model
-	spinning bool
-	detail   viewport.Model
-	summary  viewport.Model
+	screen       screen
+	width        int
+	height       int
+	username     string
+	input        textinput.Model
+	filter       textinput.Model
+	spinner      spinner.Model
+	spinning     bool
+	loadingCache bool
+	detail       viewport.Model
+	summary      viewport.Model
 
 	posts    []reddit.Item
 	comments []reddit.Item
@@ -116,6 +125,8 @@ type Model struct {
 	copying     bool
 	notice      string
 	noticeError bool
+	fromCache   bool
+	cachedAt    time.Time
 }
 
 func New(client *reddit.Client) *Model {
@@ -147,6 +158,7 @@ func New(client *reddit.Client) *Model {
 		openURL:      openInBrowser,
 		copyText:     copyToClipboard,
 		store:        bookmarks.NewStore(),
+		history:      historycache.NewStore(),
 		screen:       searchScreen,
 		input:        in,
 		filter:       filter,
@@ -180,17 +192,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status[key] = *msg.progress
 			return m, waitForEvent(m.events)
 		}
+		if msg.err != nil {
+			m.screen = searchScreen
+			m.loadingCache = false
+			m.events = nil
+			m.cancel = nil
+			m.searchErr = msg.err.Error()
+			m.input.Focus()
+			return m, textinput.Blink
+		}
 		if msg.result != nil {
 			m.posts = msg.result.Posts
 			m.comments = msg.result.Comments
 			m.errors = msg.result.Errors
 			m.screen = resultsScreen
+			m.loadingCache = false
+			m.fromCache = msg.fromCache
+			m.cachedAt = msg.cachedAt
 			m.events = nil
 			if m.cancel != nil {
 				m.cancel()
 			}
 			m.cancel = nil
 			m.refreshVisible()
+			if msg.cacheErr != nil {
+				m.setActionError("cache failed: " + msg.cacheErr.Error())
+			}
 			return m, nil
 		}
 	case actionMsg:
@@ -269,6 +296,15 @@ func (m *Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.username = username
 			m.searchErr = ""
 			return m, m.beginSearch()
+		case "ctrl+o":
+			username, err := reddit.NormalizeUsername(m.input.Value())
+			if err != nil {
+				m.searchErr = err.Error()
+				return m, nil
+			}
+			m.username = username
+			m.searchErr = ""
+			return m, m.beginCachedSearch()
 		case "esc":
 			m.input.SetValue("")
 			m.searchErr = ""
@@ -472,13 +508,48 @@ func (m *Model) updateSummary(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) beginSearch() tea.Cmd {
-	if m.cancel != nil {
-		m.cancel()
-	}
+	m.prepareSearch()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	m.searchID++
+	m.loadingCache = false
 	searchID := m.searchID
+	m.events = make(chan searchEvent, 128)
+	ch := m.events
+	username := m.username
+	client := m.client
+	store := m.history
+	go func() {
+		defer close(ch)
+		result := client.SearchAll(ctx, username, func(p reddit.Progress) {
+			copy := p
+			select {
+			case ch <- searchEvent{id: searchID, progress: &copy}:
+			case <-ctx.Done():
+			}
+		})
+		var cacheErr error
+		if ctx.Err() == nil {
+			cacheErr = cacheSnapshot(store, username, result)
+		}
+		select {
+		case ch <- searchEvent{id: searchID, result: &result, cacheErr: cacheErr}:
+		case <-ctx.Done():
+		}
+	}()
+	commands := []tea.Cmd{waitForEvent(ch)}
+	if !m.spinning {
+		m.spinning = true
+		commands = append(commands, m.spinner.Tick)
+	}
+	return tea.Batch(commands...)
+}
+
+func (m *Model) prepareSearch() {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+	m.searchID++
 	m.screen = loadingScreen
 	m.input.Blur()
 	m.status = make(map[string]reddit.Progress)
@@ -495,30 +566,8 @@ func (m *Model) beginSearch() tea.Cmd {
 	m.tab = allTab
 	m.ordering = newestFirst
 	m.selected, m.offset = 0, 0
-	m.events = make(chan searchEvent, 128)
-	ch := m.events
-	username := m.username
-	client := m.client
-	go func() {
-		defer close(ch)
-		result := client.SearchAll(ctx, username, func(p reddit.Progress) {
-			copy := p
-			select {
-			case ch <- searchEvent{id: searchID, progress: &copy}:
-			case <-ctx.Done():
-			}
-		})
-		select {
-		case ch <- searchEvent{id: searchID, result: &result}:
-		case <-ctx.Done():
-		}
-	}()
-	commands := []tea.Cmd{waitForEvent(ch)}
-	if !m.spinning {
-		m.spinning = true
-		commands = append(commands, m.spinner.Tick)
-	}
-	return tea.Batch(commands...)
+	m.fromCache = false
+	m.cachedAt = time.Time{}
 }
 
 func waitForEvent(ch <-chan searchEvent) tea.Cmd {
@@ -675,9 +724,9 @@ func (m *Model) viewSearch() string {
 	if m.searchErr != "" {
 		b.WriteString("\n" + errorStyle.Render(wrapText(m.searchErr, contentWidth)))
 	}
-	help := "enter search  •  ctrl+b bookmarks  •  ctrl+c quit"
+	help := "enter search  •  ctrl+o offline  •  ctrl+b bookmarks  •  ctrl+c quit"
 	if m.width < 30 {
-		help = "enter  •  ^b saved  •  ^c quit"
+		help = "enter  •  ^o cache  •  ^b saved  •  ^c quit"
 	}
 	b.WriteString(gap + mutedStyle.Render(wrapText(help, contentWidth)))
 	return center(m.width, m.height, b.String())
@@ -692,11 +741,21 @@ func (m *Model) viewLoading() string {
 	}
 	b.WriteString(gap)
 	contentWidth := max(4, min(72, m.width-4))
-	b.WriteString(m.spinner.View() + " " + titleStyle.Render(wrapText("Crawling u/"+m.username, max(3, contentWidth-3))))
+	activity := "Crawling u/" + m.username
+	if m.loadingCache {
+		activity = "Loading cached history for u/" + m.username
+	}
+	b.WriteString(m.spinner.View() + " " + titleStyle.Render(wrapText(activity, max(3, contentWidth-3))))
 	if m.height >= 14 {
 		description := "Fetching all available history from both archives."
+		if m.loadingCache {
+			description = "Reading the most recently saved crawl without network access."
+		}
 		if m.width >= 48 && m.height >= 18 {
 			description = "Fetching the complete available history; each archive has an independent cursor."
+			if m.loadingCache {
+				description = "Reading the most recently saved crawl without contacting either archive."
+			}
 		}
 		b.WriteString("\n" + mutedStyle.Render(wrapText(description, contentWidth)))
 	}
@@ -729,7 +788,11 @@ func (m *Model) viewLoading() string {
 func (m *Model) viewResults() string {
 	var b strings.Builder
 	contentWidth := max(4, m.width-4)
-	header := truncate(fmt.Sprintf("THIS YOU?  /  u/%s  /  %s", m.username, m.ordering.label()), contentWidth)
+	headerText := fmt.Sprintf("THIS YOU?  /  u/%s  /  %s", m.username, m.ordering.label())
+	if m.fromCache {
+		headerText += "  /  CACHED " + m.cachedAt.Local().Format("2006-01-02 15:04")
+	}
+	header := truncate(headerText, contentWidth)
 	b.WriteString(logoStyle.Render(header))
 	b.WriteString("\n")
 	b.WriteString(m.renderTabs())

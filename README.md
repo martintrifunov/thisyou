@@ -62,6 +62,7 @@ thisyou --version
 | `b` | Save or remove a bookmark |
 | `B` | Open saved bookmarks from results |
 | `ctrl+b` | Open saved bookmarks from the username screen |
+| `ctrl+o` | Open the entered user's most recent cached crawl offline |
 | `o` | Open the selected record on Reddit |
 | `y` | Copy the record URL, text, author, subreddit, or linked URL |
 | `/` | Filter the current view |
@@ -90,6 +91,10 @@ filter. Scores are archive snapshots and may differ from current Reddit karma.
 Bookmarks contain complete archived records and persist between sessions in
 `thisyou/bookmarks.json` inside the operating system's user-config directory.
 The file is written atomically with permissions restricted to the current user.
+
+Completed crawls are also cached per username. Enter a username and press
+`ctrl+o` to reopen the latest saved history without contacting either archive.
+Cached results display their save time in the results header.
 
 ## How retrieval works
 
