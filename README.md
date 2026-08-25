@@ -49,7 +49,8 @@ Reddit login or API credentials are needed.
 | `page up` / `page down` | Move by one screen |
 | `r` | Search another username |
 | `esc` | Cancel a crawl or close a record |
-| `q`, `ctrl+c` | Quit |
+| `q` | Quit from results; close an inspected record |
+| `ctrl+c` | Quit from any screen |
 
 ## How retrieval works
 

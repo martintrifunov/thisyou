@@ -6,13 +6,13 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/maco/thisyou/internal/reddit"
 )
@@ -47,7 +47,6 @@ var (
 	orange     = lipgloss.Color("#ff4500")
 	muted      = lipgloss.Color("#818384")
 	foreground = lipgloss.Color("#d7dadc")
-	panel      = lipgloss.Color("#1a1a1b")
 	border     = lipgloss.Color("#343536")
 
 	logoStyle     = lipgloss.NewStyle().Foreground(orange).Bold(true)
@@ -58,6 +57,7 @@ var (
 )
 
 type searchEvent struct {
+	id       uint64
 	progress *reddit.Progress
 	result   *reddit.Result
 }
@@ -72,6 +72,7 @@ type Model struct {
 	input    textinput.Model
 	filter   textinput.Model
 	spinner  spinner.Model
+	spinning bool
 	detail   viewport.Model
 
 	posts    []reddit.Item
@@ -87,6 +88,8 @@ type Model struct {
 	searchErr string
 	events    chan searchEvent
 	cancel    context.CancelFunc
+	searchID  uint64
+	inspected *reddit.Item
 }
 
 func New(client *reddit.Client) *Model {
@@ -130,11 +133,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.detail.Width = max(20, msg.Width-6)
-		m.detail.Height = max(5, msg.Height-8)
+		m.input.Width = max(4, min(42, msg.Width-12))
+		m.filter.Width = max(4, msg.Width-10)
+		m.resizeDetail()
 		m.ensureVisible()
 		return m, nil
 	case searchEvent:
+		if msg.id != m.searchID || m.screen != loadingScreen {
+			return m, nil
+		}
 		if msg.progress != nil {
 			key := string(msg.progress.Kind) + ":" + msg.progress.Source
 			m.status[key] = *msg.progress
@@ -146,6 +153,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errors = msg.result.Errors
 			m.screen = resultsScreen
 			m.events = nil
+			if m.cancel != nil {
+				m.cancel()
+			}
 			m.cancel = nil
 			m.refreshVisible()
 			return m, nil
@@ -156,6 +166,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
 		}
+		m.spinning = false
 	}
 
 	key, ok := msg.(tea.KeyMsg)
@@ -208,6 +219,7 @@ func (m *Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cancel != nil {
 			m.cancel()
 		}
+		m.searchID++
 		m.events = nil
 		m.cancel = nil
 		m.screen = searchScreen
@@ -248,6 +260,7 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "r":
 		m.screen = searchScreen
+		m.inspected = nil
 		m.input.SetValue("")
 		m.input.Focus()
 		m.searchErr = ""
@@ -269,8 +282,10 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ensureVisible()
 		}
 	case "pgdown", "ctrl+d":
-		m.selected = min(len(m.visible)-1, m.selected+m.pageRows())
-		m.ensureVisible()
+		if len(m.visible) > 0 {
+			m.selected = min(len(m.visible)-1, m.selected+m.pageRows())
+			m.ensureVisible()
+		}
 	case "pgup", "ctrl+u":
 		m.selected = max(0, m.selected-m.pageRows())
 		m.ensureVisible()
@@ -296,6 +311,7 @@ func (m *Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "esc", "backspace", "q":
 			m.screen = resultsScreen
+			m.inspected = nil
 			return m, nil
 		}
 	}
@@ -310,28 +326,43 @@ func (m *Model) beginSearch() tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
+	m.searchID++
+	searchID := m.searchID
 	m.screen = loadingScreen
+	m.input.Blur()
 	m.status = make(map[string]reddit.Progress)
 	m.errors = nil
 	m.posts, m.comments, m.visible = nil, nil, nil
+	m.inspected = nil
+	m.filtering = false
+	m.filter.SetValue("")
+	m.filter.Blur()
+	m.tab = allTab
+	m.selected, m.offset = 0, 0
 	m.events = make(chan searchEvent, 128)
 	ch := m.events
 	username := m.username
 	client := m.client
 	go func() {
+		defer close(ch)
 		result := client.SearchAll(ctx, username, func(p reddit.Progress) {
 			copy := p
 			select {
-			case ch <- searchEvent{progress: &copy}:
+			case ch <- searchEvent{id: searchID, progress: &copy}:
 			case <-ctx.Done():
 			}
 		})
 		select {
-		case ch <- searchEvent{result: &result}:
+		case ch <- searchEvent{id: searchID, result: &result}:
 		case <-ctx.Done():
 		}
 	}()
-	return tea.Batch(m.spinner.Tick, waitForEvent(ch))
+	commands := []tea.Cmd{waitForEvent(ch)}
+	if !m.spinning {
+		m.spinning = true
+		commands = append(commands, m.spinner.Tick)
+	}
+	return tea.Batch(commands...)
 }
 
 func waitForEvent(ch <-chan searchEvent) tea.Cmd {
@@ -373,6 +404,11 @@ func (m *Model) refreshVisible() {
 }
 
 func (m *Model) ensureVisible() {
+	if len(m.visible) == 0 {
+		m.selected, m.offset = 0, 0
+		return
+	}
+	m.selected = min(len(m.visible)-1, max(0, m.selected))
 	rows := m.pageRows()
 	if m.selected < m.offset {
 		m.offset = m.selected
@@ -384,14 +420,34 @@ func (m *Model) ensureVisible() {
 	m.offset = min(maxOffset, max(0, m.offset))
 }
 
-func (m *Model) pageRows() int { return max(1, (m.height-9)/3) }
+func (m *Model) pageRows() int {
+	chrome := 5
+	if m.filtering || m.filter.Value() != "" {
+		chrome++
+	}
+	if len(m.errors) > 0 {
+		chrome++
+	}
+	return max(1, (m.height-chrome)/2)
+}
 
 func (m *Model) openDetail(item reddit.Item) {
 	m.screen = detailScreen
-	m.detail.Width = max(20, m.width-6)
-	m.detail.Height = max(5, m.height-8)
-	m.detail.SetContent(renderDetail(item, m.detail.Width))
+	m.inspected = &item
+	m.resizeDetail()
 	m.detail.GotoTop()
+}
+
+func (m *Model) resizeDetail() {
+	width := max(1, m.width-4)
+	height := max(1, m.height-4)
+	offset := m.detail.YOffset
+	m.detail.Width = width
+	m.detail.Height = height
+	if m.inspected != nil {
+		m.detail.SetContent(renderDetail(*m.inspected, width))
+		m.detail.SetYOffset(offset)
+	}
 }
 
 func (m *Model) View() string {
@@ -411,31 +467,53 @@ func (m *Model) View() string {
 
 func (m *Model) viewSearch() string {
 	var b strings.Builder
-	if m.width >= 76 {
-		b.WriteString(logoStyle.Render(logo))
+	if m.width >= 76 && m.height >= 20 {
+		b.WriteString(logoStyle.Render(strings.TrimPrefix(logo, "\n")))
 	} else {
 		b.WriteString(logoStyle.Render("THIS YOU?"))
 	}
-	b.WriteString("\n\n")
-	b.WriteString(titleStyle.Render("A Reddit archive history viewer"))
-	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("Search public Arctic Shift + PullPush archive records"))
-	b.WriteString("\n\n")
-	b.WriteString(lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Render(m.input.View()))
-	if m.searchErr != "" {
-		b.WriteString("\n" + errorStyle.Render(m.searchErr))
+	gap := "\n\n"
+	if m.height < 14 {
+		gap = "\n"
 	}
-	b.WriteString("\n\n" + mutedStyle.Render("enter search  •  ctrl+c quit"))
+	b.WriteString(gap)
+	contentWidth := max(4, min(58, m.width-4))
+	b.WriteString(titleStyle.Render(wrapText("A Reddit archive history viewer", contentWidth)))
+	if m.height >= 15 {
+		b.WriteString("\n")
+		b.WriteString(mutedStyle.Render(wrapText("Search public Arctic Shift + PullPush archive records", contentWidth)))
+	}
+	b.WriteString(gap)
+	b.WriteString(m.renderUsernameInput())
+	if m.searchErr != "" {
+		b.WriteString("\n" + errorStyle.Render(wrapText(m.searchErr, contentWidth)))
+	}
+	help := "enter search  •  ctrl+c quit"
+	if m.width < 30 {
+		help = "enter  •  ^c quit"
+	}
+	b.WriteString(gap + mutedStyle.Render(wrapText(help, contentWidth)))
 	return center(m.width, m.height, b.String())
 }
 
 func (m *Model) viewLoading() string {
 	var b strings.Builder
 	b.WriteString(logoStyle.Render("THIS YOU?"))
-	b.WriteString("\n\n")
-	b.WriteString(m.spinner.View() + " " + titleStyle.Render("Crawling u/"+m.username))
-	b.WriteString("\n" + mutedStyle.Render("Fetching the complete available history; each archive has an independent cursor."))
-	b.WriteString("\n\n")
+	gap := "\n\n"
+	if m.height < 16 {
+		gap = "\n"
+	}
+	b.WriteString(gap)
+	contentWidth := max(4, min(72, m.width-4))
+	b.WriteString(m.spinner.View() + " " + titleStyle.Render(wrapText("Crawling u/"+m.username, max(3, contentWidth-3))))
+	if m.height >= 14 {
+		description := "Fetching all available history from both archives."
+		if m.width >= 48 && m.height >= 18 {
+			description = "Fetching the complete available history; each archive has an independent cursor."
+		}
+		b.WriteString("\n" + mutedStyle.Render(wrapText(description, contentWidth)))
+	}
+	b.WriteString(gap)
 	keys := make([]string, 0, len(m.status))
 	for key := range m.status {
 		keys = append(keys, key)
@@ -450,24 +528,30 @@ func (m *Model) viewLoading() string {
 		if p.Err != nil {
 			state = fmt.Sprintf("unavailable  •  %d records retained", p.Total)
 		}
-		b.WriteString(fmt.Sprintf("%-28s %s\n", p.Source+" "+string(p.Kind)+"s", state))
+		label := p.Source + " " + string(p.Kind) + "s"
+		line := fmt.Sprintf("%-28s %s", label, state)
+		if m.width < 58 {
+			line = label + "  " + state
+		}
+		b.WriteString(truncate(line, contentWidth) + "\n")
 	}
-	b.WriteString("\n" + mutedStyle.Render("esc cancel  •  ctrl+c quit"))
+	b.WriteString("\n" + mutedStyle.Render(truncate("esc cancel  •  ctrl+c quit", contentWidth)))
 	return center(m.width, m.height, b.String())
 }
 
 func (m *Model) viewResults() string {
 	var b strings.Builder
-	header := fmt.Sprintf("THIS YOU?  /  u/%s", m.username)
+	contentWidth := max(4, m.width-4)
+	header := truncate(fmt.Sprintf("THIS YOU?  /  u/%s", m.username), contentWidth)
 	b.WriteString(logoStyle.Render(header))
 	b.WriteString("\n")
 	b.WriteString(m.renderTabs())
 	b.WriteString("\n")
 	if m.filtering || m.filter.Value() != "" {
-		b.WriteString(m.filter.View() + "\n")
+		b.WriteString(m.renderFilterInput() + "\n")
 	}
 	if len(m.visible) == 0 {
-		b.WriteString("\n" + mutedStyle.Render("No archived records found for this view.") + "\n")
+		b.WriteString("\n" + mutedStyle.Render(wrapText("No archived records found for this view.", contentWidth)) + "\n")
 	} else {
 		rows := m.pageRows()
 		end := min(len(m.visible), m.offset+rows)
@@ -477,22 +561,41 @@ func (m *Model) viewResults() string {
 		}
 	}
 	if len(m.errors) > 0 {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Partial results: %d archive stream(s) unavailable", len(m.errors))) + "\n")
+		message := fmt.Sprintf("Partial results: %d archive stream(s) unavailable", len(m.errors))
+		b.WriteString(errorStyle.Render(truncate(message, contentWidth)) + "\n")
 	}
 	position := "0/0"
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footer := fmt.Sprintf("%s  •  j/k move  enter inspect  tab view  / filter  r new search  q quit", position)
-	b.WriteString(mutedStyle.Render(truncate(footer, max(10, m.width))))
-	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
+	footer := mutedStyle.Render(truncate(
+		fmt.Sprintf("%s  •  j/k move  enter inspect  tab view  / filter  r new search  q quit", position),
+		max(10, m.width-4),
+	))
+	body := strings.TrimRight(b.String(), "\n")
+	innerHeight := max(1, m.height-2)
+	spacer := max(0, innerHeight-lipgloss.Height(body)-lipgloss.Height(footer))
+	content := body + strings.Repeat("\n", spacer) + "\n" + footer
+	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
+	return fillScreen(m.width, m.height, framed, lipgloss.Left, lipgloss.Top)
 }
 
 func (m *Model) renderTabs() string {
-	labels := []string{
-		fmt.Sprintf("ALL %d", len(m.posts)+len(m.comments)),
-		fmt.Sprintf("POSTS %d", len(m.posts)),
-		fmt.Sprintf("COMMENTS %d", len(m.comments)),
+	var labels []string
+	if m.width < 30 {
+		labels = []string{"A", "P", "C"}
+	} else if m.width < 45 {
+		labels = []string{
+			fmt.Sprintf("A %d", len(m.posts)+len(m.comments)),
+			fmt.Sprintf("P %d", len(m.posts)),
+			fmt.Sprintf("C %d", len(m.comments)),
+		}
+	} else {
+		labels = []string{
+			fmt.Sprintf("ALL %d", len(m.posts)+len(m.comments)),
+			fmt.Sprintf("POSTS %d", len(m.posts)),
+			fmt.Sprintf("COMMENTS %d", len(m.comments)),
+		}
 	}
 	parts := make([]string, len(labels))
 	for i, label := range labels {
@@ -505,8 +608,22 @@ func (m *Model) renderTabs() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
+func (m *Model) renderUsernameInput() string {
+	width := max(4, min(46, m.width-8))
+	content := ansi.Truncate(m.input.View(), width, "")
+	content = lipgloss.PlaceHorizontal(width, lipgloss.Left, content)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Render(content)
+}
+
+func (m *Model) renderFilterInput() string {
+	width := max(4, m.width-4)
+	content := ansi.Truncate(m.filter.View(), width, "")
+	return lipgloss.PlaceHorizontal(width, lipgloss.Left, content)
+}
+
 func (m *Model) renderRow(item reddit.Item, selected bool) string {
-	width := max(30, m.width-6)
+	rowWidth := max(4, m.width-4)
+	contentWidth := max(1, rowWidth-1)
 	kind := "COMMENT"
 	headline := clean(item.Body)
 	if item.Kind == reddit.Post {
@@ -517,60 +634,85 @@ func (m *Model) renderRow(item reddit.Item, selected bool) string {
 		}
 	}
 	meta := fmt.Sprintf("%-7s  r/%s  •  %s  •  %d points", kind, fallback(item.Subreddit, "unknown"), item.Time().Local().Format("2006-01-02 15:04"), item.Score)
-	body := "  " + truncate(headline, width-2)
-	content := truncate(meta, width) + "\n" + body
-	style := lipgloss.NewStyle().Width(width).Height(2).Foreground(foreground).PaddingLeft(1)
-	if selected {
-		style = style.Inherit(selectedStyle).BorderLeft(true).BorderStyle(lipgloss.ThickBorder()).BorderForeground(orange).PaddingLeft(0)
+	body := truncate(headline, contentWidth)
+	if contentWidth > 2 {
+		body = "  " + truncate(headline, contentWidth-2)
 	}
-	return style.Render(content)
+	content := truncate(meta, contentWidth) + "\n" + body
+	style := lipgloss.NewStyle().Width(contentWidth).Height(2).Foreground(foreground)
+	marker := " \n "
+	if selected {
+		style = style.Inherit(selectedStyle)
+		marker = logoStyle.Render("┃\n┃")
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, marker, style.Render(content))
 }
 
 func (m *Model) viewDetail() string {
-	var b strings.Builder
-	b.WriteString(logoStyle.Render("THIS YOU?  /  RECORD"))
-	b.WriteString("\n")
-	b.WriteString(m.detail.View())
-	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("j/k or arrows scroll  •  esc/backspace return"))
-	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
+	width := max(1, m.width-4)
+	header := logoStyle.Render(truncate("THIS YOU?  /  RECORD", width))
+	help := "j/k or arrows scroll  •  esc/backspace return"
+	if width < 48 {
+		help = "j/k scroll  •  esc return"
+	}
+	footer := mutedStyle.Render(truncate(help, width))
+	content := lipgloss.JoinVertical(lipgloss.Left, header, m.detail.View(), footer)
+	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
+	return fillScreen(m.width, m.height, framed, lipgloss.Left, lipgloss.Top)
 }
 
 func renderDetail(item reddit.Item, width int) string {
 	var b strings.Builder
+	textWidth := max(1, width)
 	typeName := strings.ToUpper(string(item.Kind))
-	b.WriteString(logoStyle.Render(typeName))
+	typeLabel := logoStyle.Render(truncate(typeName, textWidth))
+	b.WriteString(typeLabel)
 	if item.Over18 {
-		b.WriteString("  " + errorStyle.Render("NSFW"))
+		if remaining := textWidth - lipgloss.Width(typeLabel) - 2; remaining >= 4 {
+			b.WriteString("  " + errorStyle.Render("NSFW"))
+		} else {
+			b.WriteString("\n" + errorStyle.Render(truncate("NSFW", textWidth)))
+		}
 	}
 	b.WriteString("\n")
 	if item.Title != "" {
-		b.WriteString(titleStyle.Render(wrapText(item.Title, max(10, width-2))) + "\n\n")
+		b.WriteString(titleStyle.Render(wrapText(item.Title, textWidth)) + "\n\n")
 	}
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("u/%s in r/%s", fallback(item.Author, "unknown"), fallback(item.Subreddit, "unknown"))))
-	b.WriteString("\n" + mutedStyle.Render(item.Time().Local().Format(time.RFC1123)))
-	b.WriteString(fmt.Sprintf("\n%d points", item.Score))
+	metadata := fmt.Sprintf("u/%s in r/%s", fallback(item.Author, "unknown"), fallback(item.Subreddit, "unknown"))
+	b.WriteString(mutedStyle.Render(wrapText(metadata, textWidth)))
+	b.WriteString("\n" + mutedStyle.Render(wrapText(item.Time().Local().Format(time.RFC1123), textWidth)))
+	activity := fmt.Sprintf("%d points", item.Score)
 	if item.Kind == reddit.Post {
-		b.WriteString(fmt.Sprintf("  •  %d comments", item.NumComments))
+		activity += fmt.Sprintf("  •  %d comments", item.NumComments)
 	}
-	b.WriteString("\narchive: " + strings.Join(item.Sources, " + "))
+	b.WriteString("\n" + wrapText(activity, textWidth))
+	b.WriteString("\n" + wrapText("archive: "+strings.Join(item.Sources, " + "), textWidth))
 	b.WriteString("\n\n")
 	if item.Body == "" {
 		b.WriteString(mutedStyle.Render("(no text content)"))
 	} else {
-		b.WriteString(wrapText(item.Body, max(10, width-2)))
+		b.WriteString(wrapText(item.Body, textWidth))
 	}
 	if link := item.RedditURL(); link != "" {
-		b.WriteString("\n\n" + mutedStyle.Render("Reddit URL:") + "\n" + wrapText(link, max(10, width-2)))
+		b.WriteString("\n\n" + mutedStyle.Render("Reddit URL:") + "\n" + wrapText(link, textWidth))
 	}
 	if item.URL != "" && item.URL != item.RedditURL() {
-		b.WriteString("\n\n" + mutedStyle.Render("Linked URL:") + "\n" + wrapText(item.URL, max(10, width-2)))
+		b.WriteString("\n\n" + mutedStyle.Render("Linked URL:") + "\n" + wrapText(item.URL, textWidth))
 	}
 	return b.String()
 }
 
 func center(width, height int, content string) string {
-	return lipgloss.Place(max(1, width), max(1, height), lipgloss.Center, lipgloss.Center, content)
+	width, height = max(1, width), max(1, height)
+	vertical := lipgloss.Center
+	if lipgloss.Height(content) >= height {
+		vertical = lipgloss.Top
+	}
+	return fillScreen(width, height, content, lipgloss.Center, vertical)
+}
+
+func fillScreen(width, height int, content string, horizontal, vertical lipgloss.Position) string {
+	return lipgloss.Place(max(1, width), max(1, height), horizontal, vertical, content)
 }
 
 func clean(value string) string {
@@ -583,44 +725,14 @@ func truncate(value string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if utf8.RuneCountInString(value) <= width {
-		return value
-	}
-	if width == 1 {
-		return "…"
-	}
-	runes := []rune(value)
-	return string(runes[:width-1]) + "…"
+	return ansi.Truncate(value, width, "…")
 }
 
 func wrapText(value string, width int) string {
 	if width <= 0 || value == "" {
 		return value
 	}
-	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
-	wrapped := make([]string, 0, len(lines))
-	for _, line := range lines {
-		runes := []rune(line)
-		for len(runes) > width {
-			cut := width
-			for i := width; i > 0; i-- {
-				if runes[i-1] == ' ' || runes[i-1] == '\t' {
-					cut = i - 1
-					break
-				}
-			}
-			if cut == 0 {
-				cut = width
-			}
-			wrapped = append(wrapped, strings.TrimRight(string(runes[:cut]), " \t"))
-			runes = runes[cut:]
-			for len(runes) > 0 && (runes[0] == ' ' || runes[0] == '\t') {
-				runes = runes[1:]
-			}
-		}
-		wrapped = append(wrapped, string(runes))
-	}
-	return strings.Join(wrapped, "\n")
+	return ansi.Wrap(strings.ReplaceAll(value, "\r\n", "\n"), width, " \t")
 }
 
 func fallback(value, defaultValue string) string {
