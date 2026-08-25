@@ -9,7 +9,6 @@ import (
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,30}$`)
 
-// NormalizeUsername accepts a bare name, u/name, /u/name, @name, or Reddit profile URL.
 func NormalizeUsername(input string) (string, error) {
 	name := strings.TrimSpace(input)
 	if parsed, err := url.Parse(name); err == nil && parsed.Host != "" {
