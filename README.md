@@ -44,6 +44,12 @@ make install BINDIR="$HOME/.local/bin"
 Enter a bare username, `u/username`, `@username`, or a Reddit profile URL. No
 Reddit login or API credentials are needed.
 
+Check the installed version without starting the TUI:
+
+```sh
+thisyou --version
+```
+
 ## Keys
 
 | Key | Action |
