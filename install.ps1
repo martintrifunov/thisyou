@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$InstallDir = $env:THISYOU_INSTALL_DIR
+    [string]$InstallDir = $env:THISYOU_INSTALL_DIR,
+    [switch]$CheckArchitecture
 )
 
 Set-StrictMode -Version Latest
@@ -10,6 +11,29 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
     throw "This installer supports Windows only."
 }
 
+$Architecture = [System.Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITEW6432")
+if ([string]::IsNullOrWhiteSpace($Architecture)) {
+    $Architecture = [System.Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITECTURE")
+}
+if ([string]::IsNullOrWhiteSpace($Architecture)) {
+    throw "Unable to detect the Windows processor architecture."
+}
+switch ($Architecture.ToUpperInvariant()) {
+    "AMD64" {
+        $Architecture = "amd64"
+        $ArchiveName = "thisyou-windows-amd64.zip"
+    }
+    "ARM64" {
+        $Architecture = "arm64"
+        $ArchiveName = "thisyou-windows-arm64.zip"
+    }
+    default { throw "Unsupported Windows architecture: $Architecture" }
+}
+if ($CheckArchitecture) {
+    Write-Output $ArchiveName
+    return
+}
+
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         $InstallDir = Join-Path $env:USERPROFILE "AppData\Local\Programs\thisyou"
@@ -17,13 +41,6 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     else {
         $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\thisyou"
     }
-}
-
-$Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-switch ($Architecture) {
-    "x64" { $ArchiveName = "thisyou-windows-amd64.zip" }
-    "arm64" { $ArchiveName = "thisyou-windows-arm64.zip" }
-    default { throw "Unsupported Windows architecture: $Architecture" }
 }
 
 $ReleaseBase = "https://github.com/martintrifunov/thisyou/releases/latest/download"

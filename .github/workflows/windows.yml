@@ -33,6 +33,10 @@ jobs:
             $errors | ForEach-Object { Write-Error $_ }
             exit 1
           }
+          $archive = & .\install.ps1 -CheckArchitecture
+          if ($archive -notin @("thisyou-windows-amd64.zip", "thisyou-windows-arm64.zip")) {
+            throw "Unexpected installer archive: $archive"
+          }
       - name: Build
         shell: powershell
         run: .\build.ps1 -Task Build
