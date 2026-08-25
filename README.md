@@ -81,7 +81,7 @@ After pressing `y`, use `u` for the Reddit URL, `t` for record text, `a` for
 the author, `s` for the subreddit, or `l` for the linked URL. Press `esc` to
 close the copy menu.
 
-The `/` filter accepts text plus optional query tokens: `sub:golang`,
+The `/` filter accepts text plus optional query tokens: `sub:AskReddit`,
 `type:post`, `after:2025-01-01`, `before:2025-12-31`, `min:10`, and `max:100`.
 Dates are inclusive and plain text terms must all match.
 

@@ -101,7 +101,7 @@ func renderHelp(width int) string {
 		}},
 		{"FILTER TOKENS", []helpEntry{
 			{"plain text", "Require every text term to match"},
-			{"sub:golang", "Match one subreddit"},
+			{"sub:AskReddit", "Match one subreddit"},
 			{"type:post", "Match posts or comments"},
 			{"after:YYYY-MM-DD", "Match that date and later"},
 			{"before:YYYY-MM-DD", "Match that date and earlier"},

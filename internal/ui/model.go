@@ -170,7 +170,7 @@ func New(client *reddit.Client) *Model {
 	in.TextStyle = lipgloss.NewStyle().Foreground(foreground)
 
 	filter := textinput.New()
-	filter.Placeholder = "text or sub:golang after:2025-01-01 min:10"
+	filter.Placeholder = "text or sub:AskReddit after:2025-01-01 min:10"
 	filter.Prompt = "/ "
 	filter.CharLimit = 100
 	filter.PromptStyle = lipgloss.NewStyle().Foreground(orange)
