@@ -18,6 +18,8 @@ func TestStoreSavesAndLoadsSnapshot(t *testing.T) {
 		SavedAt:  time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC),
 		Posts:    []reddit.Item{{Kind: reddit.Post, ID: "post", Title: "cached"}},
 		Comments: []reddit.Item{{Kind: reddit.Comment, ID: "comment", Body: "cached"}},
+		Errors:   []string{"PullPush unavailable"},
+		Warnings: []string{"record skipped"},
 	}
 	if err := store.Save(snapshot); err != nil {
 		t.Fatal(err)
@@ -26,7 +28,7 @@ func TestStoreSavesAndLoadsSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || loaded.Username != "alice" || len(loaded.Posts) != 1 || len(loaded.Comments) != 1 || !loaded.SavedAt.Equal(snapshot.SavedAt) {
+	if !found || loaded.Username != "alice" || len(loaded.Posts) != 1 || len(loaded.Comments) != 1 || len(loaded.Errors) != 1 || len(loaded.Warnings) != 1 || !loaded.SavedAt.Equal(snapshot.SavedAt) {
 		t.Fatalf("loaded snapshot = %+v, found = %v", loaded, found)
 	}
 	info, err := os.Stat(filepath.Join(directory, "alice.json"))

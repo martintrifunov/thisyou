@@ -186,16 +186,22 @@ func (m *Model) resizeComparison() {
 	m.comparison.Height = height
 	left := summarizeProfile(m.posts, m.comments)
 	right := summarizeProfile(m.compareResult.Posts, m.compareResult.Comments)
-	m.comparison.SetContent(renderComparison(m.username, left, len(m.errors), m.compareUsername, right, len(m.compareResult.Errors), width))
+	m.comparison.SetContent(renderComparison(
+		m.username, left, len(m.errors), len(m.warnings),
+		m.compareUsername, right, len(m.compareResult.Errors), len(m.compareResult.Warnings), width,
+	))
 	m.comparison.SetYOffset(offset)
 }
 
-func renderComparison(leftName string, left profileSummary, leftErrors int, rightName string, right profileSummary, rightErrors, width int) string {
+func renderComparison(leftName string, left profileSummary, leftErrors, leftWarnings int, rightName string, right profileSummary, rightErrors, rightWarnings, width int) string {
 	width = max(1, width)
 	metrics := comparisonMetrics(left, right)
 	var b strings.Builder
-	if leftErrors+rightErrors > 0 {
-		message := fmt.Sprintf("Partial data: u/%s has %d unavailable stream(s); u/%s has %d", leftName, leftErrors, rightName, rightErrors)
+	if leftErrors+leftWarnings+rightErrors+rightWarnings > 0 {
+		message := fmt.Sprintf(
+			"Partial data: u/%s has %d unavailable stream(s) and %d skipped record(s); u/%s has %d and %d",
+			leftName, leftErrors, leftWarnings, rightName, rightErrors, rightWarnings,
+		)
 		b.WriteString(errorStyle.Render(wrapText(message, width)) + "\n\n")
 	}
 	if width >= 64 {
@@ -296,6 +302,9 @@ func (m *Model) viewCompareLoading() string {
 		}
 		if progress.Err != nil {
 			state = fmt.Sprintf("unavailable  •  %d retained", progress.Total)
+		}
+		if progress.Skipped > 0 {
+			state += fmt.Sprintf("  •  %d skipped", progress.Skipped)
 		}
 		b.WriteString("\n" + truncate(progress.Source+" "+string(progress.Kind)+"s  "+state, contentWidth))
 	}

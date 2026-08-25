@@ -21,6 +21,7 @@ type fakeHistoryStore struct {
 	found    bool
 	err      error
 	saved    historycache.Snapshot
+	saves    int
 }
 
 func (s *fakeHistoryStore) Load(string) (historycache.Snapshot, bool, error) {
@@ -29,6 +30,7 @@ func (s *fakeHistoryStore) Load(string) (historycache.Snapshot, bool, error) {
 
 func (s *fakeHistoryStore) Save(snapshot historycache.Snapshot) error {
 	s.saved = snapshot
+	s.saves++
 	return s.err
 }
 
@@ -334,14 +336,26 @@ func TestPartialCrawlPreservesCachedRecords(t *testing.T) {
 		},
 	}
 	partial := searchResult{
-		Posts:  []reddit.Item{{Kind: reddit.Post, ID: "fresh", CreatedUTC: 2}},
-		Errors: []error{errors.New("archive unavailable")},
+		Posts:             []reddit.Item{{Kind: reddit.Post, ID: "fresh", CreatedUTC: 2}},
+		Errors:            []error{errors.New("archive unavailable")},
+		SuccessfulStreams: 1,
 	}
 	if err := cacheSnapshot(store, "alice", partial); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.saved.Posts) != 2 || store.saved.Posts[0].ID != "fresh" || store.saved.Posts[1].ID != "cached" {
 		t.Fatalf("saved partial snapshot posts = %#v", store.saved.Posts)
+	}
+}
+
+func TestCompletelyFailedCrawlIsNotCached(t *testing.T) {
+	store := &fakeHistoryStore{}
+	failed := searchResult{Errors: []error{errors.New("all archives unavailable")}}
+	if err := cacheSnapshot(store, "alice", failed); err != nil {
+		t.Fatal(err)
+	}
+	if store.saves != 0 {
+		t.Fatalf("failed crawl saved %d snapshot(s)", store.saves)
 	}
 }
 
@@ -393,7 +407,11 @@ func TestDiagnosticsShowsCoverageAndFailures(t *testing.T) {
 		"post:Arctic Shift": {Kind: reddit.Post, Source: "Arctic Shift", Page: 3, Total: 120, Done: true},
 		"comment:PullPush":  {Kind: reddit.Comment, Source: "PullPush", Page: 1, Total: 4, Done: true, Err: errors.New("down")},
 	}
-	got := ansi.Strip(renderDiagnostics("alice", "full crawl", posts, comments, status, []error{errors.New("PullPush comments: down")}, 80))
+	status["post:Arctic Shift"] = reddit.Progress{Kind: reddit.Post, Source: "Arctic Shift", Page: 3, Total: 120, Done: true, Skipped: 1}
+	got := ansi.Strip(renderDiagnostics(
+		"alice", "full crawl", posts, comments, status,
+		[]error{errors.New("PullPush comments: down")}, []error{errors.New("Arctic Shift posts: record skipped")}, 80,
+	))
 	for _, want := range []string{
 		"Last operation: full crawl",
 		"Merged history: 2 posts  •  1 comments  •  3 total",
@@ -402,6 +420,8 @@ func TestDiagnosticsShowsCoverageAndFailures(t *testing.T) {
 		"Arctic Shift posts  •  complete  •  3 page(s)  •  120 fetched",
 		"PullPush comments  •  unavailable",
 		"PARTIAL FAILURES",
+		"1 skipped",
+		"DATA WARNINGS",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("diagnostics missing %q: %q", want, got)

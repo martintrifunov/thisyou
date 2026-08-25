@@ -71,7 +71,7 @@ func TestSummarizeProfileLimitsAndSortsSubreddits(t *testing.T) {
 
 func TestRenderSummaryHandlesEmptyAndNarrowViews(t *testing.T) {
 	t.Parallel()
-	got := renderSummary("example", profileSummary{}, 2, 18)
+	got := renderSummary("example", profileSummary{}, 2, 0, 18)
 	plain := ansi.Strip(got)
 	compact := strings.Join(strings.Fields(plain), " ")
 	for _, want := range []string{"u/example", "Partial summary: 2 archive stream(s) unavailable", "0 records", "No activity dates available", "No subreddit data available"} {

@@ -125,12 +125,16 @@ func summarizeProfile(posts, comments []reddit.Item) profileSummary {
 	return summary
 }
 
-func renderSummary(username string, summary profileSummary, unavailable, width int) string {
+func renderSummary(username string, summary profileSummary, unavailable, skipped, width int) string {
 	width = max(1, width)
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(truncate("u/"+fallback(username, "unknown"), width)))
 	if unavailable > 0 {
 		message := fmt.Sprintf("Partial summary: %d archive stream(s) unavailable", unavailable)
+		b.WriteString("\n" + errorStyle.Render(wrapText(message, width)))
+	}
+	if skipped > 0 {
+		message := fmt.Sprintf("Data warning: %d archived record(s) skipped", skipped)
 		b.WriteString("\n" + errorStyle.Render(wrapText(message, width)))
 	}
 	b.WriteString("\n\n" + logoStyle.Render(truncate("ARCHIVED ACTIVITY", width)) + "\n")

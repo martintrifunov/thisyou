@@ -20,6 +20,8 @@ type Snapshot struct {
 	SavedAt  time.Time     `json:"saved_at"`
 	Posts    []reddit.Item `json:"posts"`
 	Comments []reddit.Item `json:"comments"`
+	Errors   []string      `json:"errors,omitempty"`
+	Warnings []string      `json:"warnings,omitempty"`
 }
 
 type Store struct {

@@ -14,7 +14,7 @@ func (m *Model) openDiagnostics() {
 	m.diagnostics.GotoTop()
 }
 
-func renderDiagnostics(username, run string, posts, comments []reddit.Item, status map[string]reddit.Progress, errors []error, width int) string {
+func renderDiagnostics(username, run string, posts, comments []reddit.Item, status map[string]reddit.Progress, errors, warnings []error, width int) string {
 	textWidth := max(1, width)
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(truncate("u/"+username, textWidth)))
@@ -47,6 +47,9 @@ func renderDiagnostics(username, run string, posts, comments []reddit.Item, stat
 			state = "unavailable"
 		}
 		line := fmt.Sprintf("%s %ss  •  %s  •  %d page(s)  •  %d fetched", progress.Source, progress.Kind, state, progress.Page, progress.Total)
+		if progress.Skipped > 0 {
+			line += fmt.Sprintf("  •  %d skipped", progress.Skipped)
+		}
 		style := mutedStyle
 		if progress.Err != nil {
 			style = errorStyle
@@ -58,6 +61,12 @@ func renderDiagnostics(username, run string, posts, comments []reddit.Item, stat
 		b.WriteString("\n\n" + errorStyle.Render("PARTIAL FAILURES"))
 		for _, err := range errors {
 			b.WriteString("\n" + errorStyle.Render(wrapText("• "+err.Error(), textWidth)))
+		}
+	}
+	if len(warnings) > 0 {
+		b.WriteString("\n\n" + errorStyle.Render("DATA WARNINGS"))
+		for _, warning := range warnings {
+			b.WriteString("\n" + errorStyle.Render(wrapText("• "+warning.Error(), textWidth)))
 		}
 	}
 	return b.String()

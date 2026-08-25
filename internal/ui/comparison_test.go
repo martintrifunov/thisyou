@@ -19,7 +19,7 @@ func TestRenderComparisonWideAndNarrow(t *testing.T) {
 	)
 	right := summarizeProfile([]reddit.Item{{Subreddit: "rust", Score: 5, CreatedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.Local).Unix()}}, nil)
 	for _, width := range []int{80, 28} {
-		got := renderComparison("alice", left, 0, "bob", right, 1, width)
+		got := renderComparison("alice", left, 0, 0, "bob", right, 1, 0, width)
 		plain := ansi.Strip(got)
 		for _, want := range []string{"u/alice", "u/bob", "Records", "Top subreddit", "r/golang", "r/rust", "Partial data"} {
 			if !strings.Contains(strings.ToLower(plain), strings.ToLower(want)) {

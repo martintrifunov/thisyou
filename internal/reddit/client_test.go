@@ -47,6 +47,9 @@ func TestSearchAllMergesSourcesAndKinds(t *testing.T) {
 	if len(result.Errors) != 0 {
 		t.Fatalf("unexpected errors: %v", result.Errors)
 	}
+	if result.SuccessfulStreams != 4 {
+		t.Fatalf("successful streams = %d, want 4", result.SuccessfulStreams)
+	}
 	if len(result.Posts) != 2 || len(result.Comments) != 1 {
 		t.Fatalf("got %d posts and %d comments", len(result.Posts), len(result.Comments))
 	}
@@ -126,6 +129,35 @@ func TestSearchAllRetainsPartialResultsOnSourceError(t *testing.T) {
 	}
 	if len(result.Errors) != 3 {
 		t.Fatalf("got %d errors, want 3: %v", len(result.Errors), result.Errors)
+	}
+	if result.SuccessfulStreams != 1 {
+		t.Fatalf("successful streams = %d, want 1", result.SuccessfulStreams)
+	}
+}
+
+func TestSearchAllReportsSkippedRecords(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("before") != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"id": "valid", "created_utc": 1},
+			{"id": "invalid"},
+		}})
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.ArcticShift = server.URL
+	client.PullPush = server.URL
+	client.RetryDelay = 0
+	result := client.SearchAll(context.Background(), "alice", nil)
+	if len(result.Warnings) != 4 {
+		t.Fatalf("warnings = %d, want 4: %v", len(result.Warnings), result.Warnings)
+	}
+	if result.SuccessfulStreams != 4 || len(result.Errors) != 0 {
+		t.Fatalf("successful streams = %d, errors = %v", result.SuccessfulStreams, result.Errors)
 	}
 }
 

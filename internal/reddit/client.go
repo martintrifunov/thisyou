@@ -28,19 +28,22 @@ type source struct {
 }
 
 type Progress struct {
-	Kind   Kind
-	Source string
-	Page   int
-	Items  int
-	Total  int
-	Done   bool
-	Err    error
+	Kind    Kind
+	Source  string
+	Page    int
+	Items   int
+	Total   int
+	Done    bool
+	Err     error
+	Skipped int
 }
 
 type Result struct {
-	Posts    []Item
-	Comments []Item
-	Errors   []error
+	Posts             []Item
+	Comments          []Item
+	Errors            []error
+	Warnings          []error
+	SuccessfulStreams int
 }
 
 type Client struct {
@@ -69,10 +72,11 @@ func (c *Client) SearchAfter(ctx context.Context, username string, postsAfter, c
 
 func (c *Client) search(ctx context.Context, username string, after map[Kind]int64, progress func(Progress)) Result {
 	type crawlResult struct {
-		kind   Kind
-		source string
-		items  []Item
-		err    error
+		kind     Kind
+		source   string
+		items    []Item
+		err      error
+		warnings []error
 	}
 
 	sources := []source{{"Arctic Shift", c.ArcticShift}, {"PullPush", c.PullPush}}
@@ -84,8 +88,8 @@ func (c *Client) search(ctx context.Context, username string, after map[Kind]int
 			wg.Add(1)
 			go func(kind Kind, src source) {
 				defer wg.Done()
-				items, err := c.crawl(ctx, username, kind, src, after[kind], progress)
-				results <- crawlResult{kind: kind, source: src.name, items: items, err: err}
+				items, warnings, err := c.crawl(ctx, username, kind, src, after[kind], progress)
+				results <- crawlResult{kind: kind, source: src.name, items: items, warnings: warnings, err: err}
 			}(kind, src)
 		}
 	}
@@ -100,27 +104,36 @@ func (c *Client) search(ctx context.Context, username string, after map[Kind]int
 		byKind[result.kind] = append(byKind[result.kind], result.items...)
 		if result.err != nil && !errors.Is(result.err, context.Canceled) {
 			out.Errors = append(out.Errors, fmt.Errorf("%s %ss: %w", result.source, result.kind, result.err))
+		} else if result.err == nil {
+			out.SuccessfulStreams++
+		}
+		for _, warning := range result.warnings {
+			out.Warnings = append(out.Warnings, fmt.Errorf("%s %ss: %w", result.source, result.kind, warning))
 		}
 	}
 	out.Posts = mergeAndSort(byKind[Post])
 	out.Comments = mergeAndSort(byKind[Comment])
+	sort.Slice(out.Errors, func(i, j int) bool { return out.Errors[i].Error() < out.Errors[j].Error() })
+	sort.Slice(out.Warnings, func(i, j int) bool { return out.Warnings[i].Error() < out.Warnings[j].Error() })
 	return out
 }
 
-func (c *Client) crawl(ctx context.Context, username string, kind Kind, src source, after int64, progress func(Progress)) ([]Item, error) {
+func (c *Client) crawl(ctx context.Context, username string, kind Kind, src source, after int64, progress func(Progress)) ([]Item, []error, error) {
 	var all []Item
+	var warnings []error
 	var before int64
 	page := 0
 	for {
 		page++
-		items, err := c.fetchPage(ctx, username, kind, src, before, after)
+		items, pageWarnings, err := c.fetchPage(ctx, username, kind, src, before, after)
+		warnings = append(warnings, pageWarnings...)
 		if err != nil {
-			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true, Err: err})
-			return all, err
+			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true, Err: err, Skipped: len(warnings)})
+			return all, warnings, err
 		}
 		if len(items) == 0 {
-			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true})
-			return all, nil
+			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true, Skipped: len(warnings)})
+			return all, warnings, nil
 		}
 
 		for _, item := range items {
@@ -128,7 +141,7 @@ func (c *Client) crawl(ctx context.Context, username string, kind Kind, src sour
 				all = append(all, item)
 			}
 		}
-		report(progress, Progress{Kind: kind, Source: src.name, Page: page, Items: len(items), Total: len(all)})
+		report(progress, Progress{Kind: kind, Source: src.name, Page: page, Items: len(items), Total: len(all), Skipped: len(warnings)})
 		oldest := items[0].CreatedUTC
 		for _, item := range items[1:] {
 			if item.CreatedUTC < oldest {
@@ -141,17 +154,17 @@ func (c *Client) crawl(ctx context.Context, username string, kind Kind, src sour
 		next := oldest
 		// A source ignoring the cursor would otherwise make the crawl infinite.
 		if oldest <= after || (before != 0 && next >= before) {
-			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true})
-			return all, nil
+			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true, Skipped: len(warnings)})
+			return all, warnings, nil
 		}
 		before = next
 	}
 }
 
-func (c *Client) fetchPage(ctx context.Context, username string, kind Kind, src source, before, after int64) ([]Item, error) {
+func (c *Client) fetchPage(ctx context.Context, username string, kind Kind, src source, before, after int64) ([]Item, []error, error) {
 	u, err := url.Parse(strings.TrimRight(src.base, "/"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if src.name == "Arctic Shift" {
 		if kind == Post {
@@ -181,26 +194,29 @@ func (c *Client) fetchPage(ctx context.Context, username string, kind Kind, src 
 
 	body, err := c.get(ctx, u.String(), true)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var envelope struct {
 		Data  []json.RawMessage `json:"data"`
 		Error any               `json:"error"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, nil, fmt.Errorf("decode response: %w", err)
 	}
 	if envelope.Error != nil && len(envelope.Data) == 0 {
-		return nil, fmt.Errorf("archive error: %v", envelope.Error)
+		return nil, nil, fmt.Errorf("archive error: %v", envelope.Error)
 	}
 	items := make([]Item, 0, len(envelope.Data))
-	for _, raw := range envelope.Data {
+	var warnings []error
+	for index, raw := range envelope.Data {
 		item, err := decodeItem(raw, kind, src.name)
-		if err == nil {
-			items = append(items, item)
+		if err != nil {
+			warnings = append(warnings, fmt.Errorf("record %d skipped: %w", index+1, err))
+			continue
 		}
+		items = append(items, item)
 	}
-	return items, nil
+	return items, warnings, nil
 }
 
 func (c *Client) get(ctx context.Context, endpoint string, retry bool) ([]byte, error) {
@@ -327,8 +343,30 @@ func mergeAndSort(items []Item) []Item {
 
 func MergeResults(base, fresh Result) Result {
 	return Result{
-		Posts:    mergeAndSort(append(append([]Item(nil), base.Posts...), fresh.Posts...)),
-		Comments: mergeAndSort(append(append([]Item(nil), base.Comments...), fresh.Comments...)),
-		Errors:   append([]error(nil), fresh.Errors...),
+		Posts:             mergeAndSort(append(append([]Item(nil), base.Posts...), fresh.Posts...)),
+		Comments:          mergeAndSort(append(append([]Item(nil), base.Comments...), fresh.Comments...)),
+		Errors:            append([]error(nil), fresh.Errors...),
+		Warnings:          mergeWarnings(base.Warnings, fresh.Warnings),
+		SuccessfulStreams: fresh.SuccessfulStreams,
 	}
+}
+
+func mergeWarnings(groups ...[]error) []error {
+	seen := make(map[string]struct{})
+	var merged []error
+	for _, group := range groups {
+		for _, warning := range group {
+			if warning == nil {
+				continue
+			}
+			message := warning.Error()
+			if _, exists := seen[message]; exists {
+				continue
+			}
+			seen[message] = struct{}{}
+			merged = append(merged, warning)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Error() < merged[j].Error() })
+	return merged
 }

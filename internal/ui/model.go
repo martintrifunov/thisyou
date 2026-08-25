@@ -127,6 +127,7 @@ type Model struct {
 	filterErr       string
 	status          map[string]reddit.Progress
 	errors          []error
+	warnings        []error
 	searchErr       string
 	events          chan searchEvent
 	cancel          context.CancelFunc
@@ -244,6 +245,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.posts = msg.result.Posts
 			m.comments = msg.result.Comments
 			m.errors = msg.result.Errors
+			m.warnings = msg.result.Warnings
 			m.screen = resultsScreen
 			m.loadingCache = false
 			m.refreshing = false
@@ -385,6 +387,7 @@ func (m *Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.posts = m.refreshBase.Posts
 			m.comments = m.refreshBase.Comments
 			m.errors = m.refreshBase.Errors
+			m.warnings = m.refreshBase.Warnings
 			m.status = m.refreshStatus
 			m.diagnosticRun = m.refreshRun
 			m.fromCache = m.refreshCached
@@ -646,6 +649,7 @@ func (m *Model) beginRefresh() tea.Cmd {
 		Posts:    append([]reddit.Item(nil), m.posts...),
 		Comments: append([]reddit.Item(nil), m.comments...),
 		Errors:   append([]error(nil), m.errors...),
+		Warnings: append([]error(nil), m.warnings...),
 	}
 	previousStatus := cloneStatus(m.status)
 	previousRun := m.diagnosticRun
@@ -725,6 +729,7 @@ func (m *Model) prepareSearch() {
 	m.input.Blur()
 	m.status = make(map[string]reddit.Progress)
 	m.errors = nil
+	m.warnings = nil
 	m.posts, m.comments, m.visible = nil, nil, nil
 	m.inspected = nil
 	m.copying = false
@@ -812,6 +817,9 @@ func (m *Model) pageRows() int {
 	if len(m.errors) > 0 {
 		chrome++
 	}
+	if len(m.warnings) > 0 {
+		chrome++
+	}
 	return max(1, (m.height-chrome)/2)
 }
 
@@ -850,7 +858,7 @@ func (m *Model) resizeSummary() {
 	offset := m.summary.YOffset
 	m.summary.Width = width
 	m.summary.Height = height
-	m.summary.SetContent(renderSummary(m.username, summarizeProfile(m.posts, m.comments), len(m.errors), width))
+	m.summary.SetContent(renderSummary(m.username, summarizeProfile(m.posts, m.comments), len(m.errors), len(m.warnings), width))
 	m.summary.SetYOffset(offset)
 }
 
@@ -860,7 +868,7 @@ func (m *Model) resizeDiagnostics() {
 	offset := m.diagnostics.YOffset
 	m.diagnostics.Width = width
 	m.diagnostics.Height = height
-	m.diagnostics.SetContent(renderDiagnostics(m.username, m.diagnosticRun, m.posts, m.comments, m.status, m.errors, width))
+	m.diagnostics.SetContent(renderDiagnostics(m.username, m.diagnosticRun, m.posts, m.comments, m.status, m.errors, m.warnings, width))
 	m.diagnostics.SetYOffset(offset)
 }
 
@@ -1011,6 +1019,10 @@ func (m *Model) viewResults() string {
 	}
 	if len(m.errors) > 0 {
 		message := fmt.Sprintf("Partial results: %d archive stream(s) unavailable", len(m.errors))
+		b.WriteString(errorStyle.Render(truncate(message, contentWidth)) + "\n")
+	}
+	if len(m.warnings) > 0 {
+		message := fmt.Sprintf("Data warning: %d archived record(s) skipped", len(m.warnings))
 		b.WriteString(errorStyle.Render(truncate(message, contentWidth)) + "\n")
 	}
 	position := "0/0"
