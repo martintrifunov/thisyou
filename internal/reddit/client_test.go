@@ -145,3 +145,74 @@ func TestCancellationInterruptsRetryDelay(t *testing.T) {
 		t.Fatalf("get error = %v, want context.Canceled", err)
 	}
 }
+
+func TestSearchAfterUsesIndependentKindBoundaries(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	seenAfter := map[string][]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seenAfter[r.URL.Path] = append(seenAfter[r.URL.Path], r.URL.Query().Get("after"))
+		mu.Unlock()
+		created := int64(101)
+		if r.URL.Path == "/api/comments/search" || r.URL.Path == "/reddit/search/comment/" {
+			created = 201
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": r.URL.Path, "created_utc": created}}})
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	client.ArcticShift = server.URL
+	client.PullPush = server.URL
+	client.RetryDelay = 0
+	result := client.SearchAfter(context.Background(), "alice", 100, 200, nil)
+	if len(result.Posts) != 2 || len(result.Comments) != 2 {
+		t.Fatalf("got %d posts and %d comments", len(result.Posts), len(result.Comments))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for path, values := range seenAfter {
+		want := "100"
+		if path == "/api/comments/search" || path == "/reddit/search/comment/" {
+			want = "200"
+		}
+		for _, got := range values {
+			if got != want {
+				t.Fatalf("%s after = %q, want %q", path, got, want)
+			}
+		}
+	}
+}
+
+func TestSearchAfterExcludesBoundaryRecords(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"id": "new", "created_utc": 11},
+			{"id": "boundary", "created_utc": 10},
+		}})
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.ArcticShift = server.URL
+	client.PullPush = server.URL
+	client.RetryDelay = 0
+	result := client.SearchAfter(context.Background(), "alice", 10, 10, nil)
+	if len(result.Posts) != 1 || result.Posts[0].ID != "new" || len(result.Comments) != 1 || result.Comments[0].ID != "new" {
+		t.Fatalf("boundary filtering returned posts %#v, comments %#v", result.Posts, result.Comments)
+	}
+}
+
+func TestMergeResultsDeduplicatesFreshRecords(t *testing.T) {
+	t.Parallel()
+	base := Result{Posts: []Item{{Kind: Post, ID: "same", CreatedUTC: 10, Sources: []string{"PullPush"}}}}
+	fresh := Result{
+		Posts:  []Item{{Kind: Post, ID: "same", CreatedUTC: 10, Title: "richer", Sources: []string{"Arctic Shift"}}, {Kind: Post, ID: "new", CreatedUTC: 20}},
+		Errors: []error{errors.New("partial")},
+	}
+	merged := MergeResults(base, fresh)
+	if len(merged.Posts) != 2 || merged.Posts[0].ID != "new" || merged.Posts[1].Title != "richer" || len(merged.Errors) != 1 {
+		t.Fatalf("merged result = %#v", merged)
+	}
+}

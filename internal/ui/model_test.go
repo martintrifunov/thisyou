@@ -325,6 +325,43 @@ func TestOpenMissingCachedHistoryReturnsToSearch(t *testing.T) {
 	}
 }
 
+func TestLatestTimestamp(t *testing.T) {
+	t.Parallel()
+	items := []reddit.Item{{CreatedUTC: 15}, {CreatedUTC: 42}, {CreatedUTC: 8}}
+	if got := latestTimestamp(items); got != 42 {
+		t.Fatalf("latest timestamp = %d, want 42", got)
+	}
+}
+
+func TestRefreshCompletionShowsAddedRecords(t *testing.T) {
+	m := New(nil)
+	m.screen = loadingScreen
+	m.searchID = 4
+	m.refreshing = true
+	result := searchResult{Posts: []reddit.Item{{Kind: reddit.Post, ID: "new"}}}
+	_, _ = m.Update(searchEvent{id: 4, result: &result, refreshed: true, added: 1})
+	if m.screen != resultsScreen || m.refreshing || len(m.posts) != 1 {
+		t.Fatalf("refresh state = screen %d, refreshing %v, posts %d", m.screen, m.refreshing, len(m.posts))
+	}
+	if m.notice != "refresh complete: 1 new record(s)" || m.noticeError {
+		t.Fatalf("refresh notice = %q, error = %v", m.notice, m.noticeError)
+	}
+}
+
+func TestCancelRefreshRestoresExistingResults(t *testing.T) {
+	m := New(nil)
+	m.screen = loadingScreen
+	m.refreshing = true
+	m.refreshBase = searchResult{
+		Posts:    []reddit.Item{{Kind: reddit.Post, ID: "old"}},
+		Comments: []reddit.Item{{Kind: reddit.Comment, ID: "comment"}},
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.screen != resultsScreen || m.refreshing || len(m.posts) != 1 || len(m.comments) != 1 {
+		t.Fatalf("cancelled refresh state = screen %d, refreshing %v, posts %d, comments %d", m.screen, m.refreshing, len(m.posts), len(m.comments))
+	}
+}
+
 func TestEmptyResultsNavigationKeepsValidSelection(t *testing.T) {
 	m := New(nil)
 	m.screen = resultsScreen

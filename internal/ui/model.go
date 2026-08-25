@@ -73,6 +73,8 @@ type searchEvent struct {
 	cacheErr  error
 	cachedAt  time.Time
 	fromCache bool
+	refreshed bool
+	added     int
 }
 
 type searchResult = reddit.Result
@@ -93,6 +95,7 @@ type Model struct {
 	spinner      spinner.Model
 	spinning     bool
 	loadingCache bool
+	refreshing   bool
 	detail       viewport.Model
 	summary      viewport.Model
 
@@ -127,6 +130,7 @@ type Model struct {
 	noticeError bool
 	fromCache   bool
 	cachedAt    time.Time
+	refreshBase searchResult
 }
 
 func New(client *reddit.Client) *Model {
@@ -195,6 +199,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.screen = searchScreen
 			m.loadingCache = false
+			m.refreshing = false
 			m.events = nil
 			m.cancel = nil
 			m.searchErr = msg.err.Error()
@@ -207,6 +212,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errors = msg.result.Errors
 			m.screen = resultsScreen
 			m.loadingCache = false
+			m.refreshing = false
 			m.fromCache = msg.fromCache
 			m.cachedAt = msg.cachedAt
 			m.events = nil
@@ -215,6 +221,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.cancel = nil
 			m.refreshVisible()
+			if msg.refreshed {
+				m.notice = fmt.Sprintf("refresh complete: %d new record(s)", msg.added)
+				m.noticeError = false
+			}
 			if msg.cacheErr != nil {
 				m.setActionError("cache failed: " + msg.cacheErr.Error())
 			}
@@ -324,6 +334,16 @@ func (m *Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchID++
 		m.events = nil
 		m.cancel = nil
+		if m.refreshing {
+			m.posts = m.refreshBase.Posts
+			m.comments = m.refreshBase.Comments
+			m.errors = m.refreshBase.Errors
+			m.refreshing = false
+			m.screen = resultsScreen
+			m.refreshVisible()
+			return m, nil
+		}
+		m.loadingCache = false
 		m.screen = searchScreen
 		m.input.Focus()
 		return m, textinput.Blink
@@ -440,6 +460,8 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshVisible()
 		m.notice = "sort: " + strings.ToLower(m.ordering.label())
 		m.noticeError = false
+	case "R":
+		return m, m.beginRefresh()
 	case "B":
 		return m, m.openBookmarks()
 	case "b":
@@ -544,6 +566,63 @@ func (m *Model) beginSearch() tea.Cmd {
 	return tea.Batch(commands...)
 }
 
+func (m *Model) beginRefresh() tea.Cmd {
+	base := searchResult{
+		Posts:    append([]reddit.Item(nil), m.posts...),
+		Comments: append([]reddit.Item(nil), m.comments...),
+		Errors:   append([]error(nil), m.errors...),
+	}
+	postsAfter := latestTimestamp(base.Posts)
+	commentsAfter := latestTimestamp(base.Comments)
+	m.prepareSearch()
+	m.refreshing = true
+	m.refreshBase = base
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	searchID := m.searchID
+	m.events = make(chan searchEvent, 128)
+	ch := m.events
+	username := m.username
+	client := m.client
+	store := m.history
+	go func() {
+		defer close(ch)
+		fresh := client.SearchAfter(ctx, username, postsAfter, commentsAfter, func(p reddit.Progress) {
+			copy := p
+			select {
+			case ch <- searchEvent{id: searchID, progress: &copy}:
+			case <-ctx.Done():
+			}
+		})
+		merged := reddit.MergeResults(base, fresh)
+		added := len(merged.Posts) + len(merged.Comments) - len(base.Posts) - len(base.Comments)
+		var cacheErr error
+		if ctx.Err() == nil {
+			cacheErr = cacheSnapshot(store, username, merged)
+		}
+		select {
+		case ch <- searchEvent{id: searchID, result: &merged, cacheErr: cacheErr, refreshed: true, added: added}:
+		case <-ctx.Done():
+		}
+	}()
+	commands := []tea.Cmd{waitForEvent(ch)}
+	if !m.spinning {
+		m.spinning = true
+		commands = append(commands, m.spinner.Tick)
+	}
+	return tea.Batch(commands...)
+}
+
+func latestTimestamp(items []reddit.Item) int64 {
+	var latest int64
+	for _, item := range items {
+		if item.CreatedUTC > latest {
+			latest = item.CreatedUTC
+		}
+	}
+	return latest
+}
+
 func (m *Model) prepareSearch() {
 	if m.cancel != nil {
 		m.cancel()
@@ -568,6 +647,7 @@ func (m *Model) prepareSearch() {
 	m.selected, m.offset = 0, 0
 	m.fromCache = false
 	m.cachedAt = time.Time{}
+	m.refreshing = false
 }
 
 func waitForEvent(ch <-chan searchEvent) tea.Cmd {
@@ -744,17 +824,23 @@ func (m *Model) viewLoading() string {
 	activity := "Crawling u/" + m.username
 	if m.loadingCache {
 		activity = "Loading cached history for u/" + m.username
+	} else if m.refreshing {
+		activity = "Checking for new history from u/" + m.username
 	}
 	b.WriteString(m.spinner.View() + " " + titleStyle.Render(wrapText(activity, max(3, contentWidth-3))))
 	if m.height >= 14 {
 		description := "Fetching all available history from both archives."
 		if m.loadingCache {
 			description = "Reading the most recently saved crawl without network access."
+		} else if m.refreshing {
+			description = "Fetching only records newer than the current history."
 		}
 		if m.width >= 48 && m.height >= 18 {
 			description = "Fetching the complete available history; each archive has an independent cursor."
 			if m.loadingCache {
 				description = "Reading the most recently saved crawl without contacting either archive."
+			} else if m.refreshing {
+				description = "Fetching only newer posts and comments with independent timestamp boundaries."
 			}
 		}
 		b.WriteString("\n" + mutedStyle.Render(wrapText(description, contentWidth)))
@@ -821,7 +907,7 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footerText := fmt.Sprintf("%s  •  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footerText := fmt.Sprintf("%s  •  R refresh  S sort  b save  B bookmarks  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)

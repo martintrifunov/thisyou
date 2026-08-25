@@ -59,6 +59,14 @@ func NewClient() *Client {
 }
 
 func (c *Client) SearchAll(ctx context.Context, username string, progress func(Progress)) Result {
+	return c.search(ctx, username, nil, progress)
+}
+
+func (c *Client) SearchAfter(ctx context.Context, username string, postsAfter, commentsAfter int64, progress func(Progress)) Result {
+	return c.search(ctx, username, map[Kind]int64{Post: postsAfter, Comment: commentsAfter}, progress)
+}
+
+func (c *Client) search(ctx context.Context, username string, after map[Kind]int64, progress func(Progress)) Result {
 	type crawlResult struct {
 		kind   Kind
 		source string
@@ -75,7 +83,7 @@ func (c *Client) SearchAll(ctx context.Context, username string, progress func(P
 			wg.Add(1)
 			go func(kind Kind, src source) {
 				defer wg.Done()
-				items, err := c.crawl(ctx, username, kind, src, progress)
+				items, err := c.crawl(ctx, username, kind, src, after[kind], progress)
 				results <- crawlResult{kind: kind, source: src.name, items: items, err: err}
 			}(kind, src)
 		}
@@ -98,13 +106,13 @@ func (c *Client) SearchAll(ctx context.Context, username string, progress func(P
 	return out
 }
 
-func (c *Client) crawl(ctx context.Context, username string, kind Kind, src source, progress func(Progress)) ([]Item, error) {
+func (c *Client) crawl(ctx context.Context, username string, kind Kind, src source, after int64, progress func(Progress)) ([]Item, error) {
 	var all []Item
 	var before int64
 	page := 0
 	for {
 		page++
-		items, err := c.fetchPage(ctx, username, kind, src, before)
+		items, err := c.fetchPage(ctx, username, kind, src, before, after)
 		if err != nil {
 			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true, Err: err})
 			return all, err
@@ -114,7 +122,11 @@ func (c *Client) crawl(ctx context.Context, username string, kind Kind, src sour
 			return all, nil
 		}
 
-		all = append(all, items...)
+		for _, item := range items {
+			if item.CreatedUTC > after {
+				all = append(all, item)
+			}
+		}
 		report(progress, Progress{Kind: kind, Source: src.name, Page: page, Items: len(items), Total: len(all)})
 		oldest := items[0].CreatedUTC
 		for _, item := range items[1:] {
@@ -127,7 +139,7 @@ func (c *Client) crawl(ctx context.Context, username string, kind Kind, src sour
 		// record when several items were created in the same second.
 		next := oldest
 		// A source ignoring the cursor would otherwise make the crawl infinite.
-		if oldest <= 0 || (before != 0 && next >= before) {
+		if oldest <= after || (before != 0 && next >= before) {
 			report(progress, Progress{Kind: kind, Source: src.name, Page: page, Total: len(all), Done: true})
 			return all, nil
 		}
@@ -135,7 +147,7 @@ func (c *Client) crawl(ctx context.Context, username string, kind Kind, src sour
 	}
 }
 
-func (c *Client) fetchPage(ctx context.Context, username string, kind Kind, src source, before int64) ([]Item, error) {
+func (c *Client) fetchPage(ctx context.Context, username string, kind Kind, src source, before, after int64) ([]Item, error) {
 	u, err := url.Parse(strings.TrimRight(src.base, "/"))
 	if err != nil {
 		return nil, err
@@ -160,6 +172,9 @@ func (c *Client) fetchPage(ctx context.Context, username string, kind Kind, src 
 	}
 	if before > 0 {
 		q.Set("before", fmt.Sprint(before))
+	}
+	if after > 0 {
+		q.Set("after", fmt.Sprint(after))
 	}
 	u.RawQuery = q.Encode()
 
@@ -274,4 +289,12 @@ func mergeAndSort(items []Item) []Item {
 		return out[i].CreatedUTC > out[j].CreatedUTC
 	})
 	return out
+}
+
+func MergeResults(base, fresh Result) Result {
+	return Result{
+		Posts:    mergeAndSort(append(append([]Item(nil), base.Posts...), fresh.Posts...)),
+		Comments: mergeAndSort(append(append([]Item(nil), base.Comments...), fresh.Comments...)),
+		Errors:   append([]error(nil), fresh.Errors...),
+	}
 }

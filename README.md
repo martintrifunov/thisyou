@@ -59,6 +59,7 @@ thisyou --version
 | `enter` | Open the complete archived record |
 | `s` | Open the profile summary |
 | `S` | Cycle newest, oldest, top-score, and subreddit sorting |
+| `R` | Fetch records newer than the current history |
 | `b` | Save or remove a bookmark |
 | `B` | Open saved bookmarks from results |
 | `ctrl+b` | Open saved bookmarks from the username screen |
@@ -95,6 +96,8 @@ The file is written atomically with permissions restricted to the current user.
 Completed crawls are also cached per username. Enter a username and press
 `ctrl+o` to reopen the latest saved history without contacting either archive.
 Cached results display their save time in the results header.
+Press `R` from results to incrementally query only records newer than the latest
+cached or fetched post and comment, then merge and save the updated history.
 
 ## How retrieval works
 
