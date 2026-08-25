@@ -57,14 +57,15 @@ thisyou --version
 | `j` / `k`, arrows | Move through history |
 | `tab`, `shift+tab` | Switch All, Posts, and Comments |
 | `enter` | Open the complete archived record |
+| `s` | Open the profile summary |
 | `o` | Open the selected record on Reddit |
 | `y` | Copy the record URL, text, author, subreddit, or linked URL |
 | `/` | Filter the current view |
 | `g` / `G` | Jump to first / last result |
 | `page up` / `page down` | Move by one screen |
 | `r` | Search another username |
-| `esc` | Cancel a crawl or close a record |
-| `q` | Quit from results; close an inspected record |
+| `esc` | Cancel a crawl or close a record or summary |
+| `q` | Quit from results; close a record or summary |
 | `ctrl+c` | Quit from any screen |
 
 After pressing `y`, use `u` for the Reddit URL, `t` for record text, `a` for
@@ -74,6 +75,9 @@ close the copy menu.
 URLs in an inspected record are clickable terminal links. Ctrl-click them to
 open a browser tab; some macOS terminals use Cmd-click instead. The `o` key
 remains available when terminal hyperlinks are unsupported.
+
+The profile summary covers every fetched record regardless of the active tab or
+filter. Scores are archive snapshots and may differ from current Reddit karma.
 
 ## How retrieval works
 

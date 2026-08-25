@@ -35,6 +35,7 @@ const (
 	loadingScreen
 	resultsScreen
 	detailScreen
+	summaryScreen
 )
 
 type tab int
@@ -79,6 +80,7 @@ type Model struct {
 	spinner  spinner.Model
 	spinning bool
 	detail   viewport.Model
+	summary  viewport.Model
 
 	posts    []reddit.Item
 	comments []reddit.Item
@@ -133,6 +135,7 @@ func New(client *reddit.Client) *Model {
 		filter:   filter,
 		spinner:  spin,
 		detail:   viewport.New(80, 20),
+		summary:  viewport.New(80, 20),
 		status:   make(map[string]reddit.Progress),
 	}
 }
@@ -146,6 +149,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.Width = max(4, min(42, msg.Width-12))
 		m.filter.Width = max(4, msg.Width-10)
 		m.resizeDetail()
+		m.resizeSummary()
 		m.ensureVisible()
 		return m, nil
 	case searchEvent:
@@ -205,6 +209,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateResults(msg)
 	case detailScreen:
 		return m.updateDetail(msg)
+	case summaryScreen:
+		return m.updateSummary(msg)
 	default:
 		return m, nil
 	}
@@ -346,6 +352,8 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setActionError("no record selected")
 		}
+	case "s":
+		m.openSummary()
 	}
 	return m, nil
 }
@@ -380,6 +388,25 @@ func (m *Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.detail, cmd = m.detail.Update(msg)
+	return m, cmd
+}
+
+func (m *Model) updateSummary(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "esc", "backspace", "q":
+			m.screen = resultsScreen
+			return m, nil
+		case "g", "home":
+			m.summary.GotoTop()
+			return m, nil
+		case "G", "end":
+			m.summary.GotoBottom()
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.summary, cmd = m.summary.Update(msg)
 	return m, cmd
 }
 
@@ -507,6 +534,12 @@ func (m *Model) openDetail(item reddit.Item) {
 	m.detail.GotoTop()
 }
 
+func (m *Model) openSummary() {
+	m.screen = summaryScreen
+	m.resizeSummary()
+	m.summary.GotoTop()
+}
+
 func (m *Model) resizeDetail() {
 	width := max(1, m.width-4)
 	height := max(1, m.height-4)
@@ -519,6 +552,16 @@ func (m *Model) resizeDetail() {
 	}
 }
 
+func (m *Model) resizeSummary() {
+	width := max(1, m.width-4)
+	height := max(1, m.height-4)
+	offset := m.summary.YOffset
+	m.summary.Width = width
+	m.summary.Height = height
+	m.summary.SetContent(renderSummary(m.username, summarizeProfile(m.posts, m.comments), len(m.errors), width))
+	m.summary.SetYOffset(offset)
+}
+
 func (m *Model) View() string {
 	switch m.screen {
 	case searchScreen:
@@ -529,6 +572,8 @@ func (m *Model) View() string {
 		return m.viewResults()
 	case detailScreen:
 		return m.viewDetail()
+	case summaryScreen:
+		return m.viewSummary()
 	default:
 		return ""
 	}
@@ -637,7 +682,7 @@ func (m *Model) viewResults() string {
 	if len(m.visible) > 0 {
 		position = fmt.Sprintf("%d/%d", m.selected+1, len(m.visible))
 	}
-	footerText := fmt.Sprintf("%s  •  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
+	footerText := fmt.Sprintf("%s  •  s summary  j/k move  enter inspect  o open  y copy  / filter  q quit", position)
 	footer := truncate(m.actionFooter(footerText), max(10, m.width-4))
 	body := strings.TrimRight(b.String(), "\n")
 	innerHeight := max(1, m.height-2)
@@ -725,6 +770,19 @@ func (m *Model) viewDetail() string {
 	help = "o open  y copy  •  " + help
 	footer := truncate(m.actionFooter(help), width)
 	content := lipgloss.JoinVertical(lipgloss.Left, header, m.detail.View(), footer)
+	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
+	return fillScreen(m.width, m.height, framed, lipgloss.Left, lipgloss.Top)
+}
+
+func (m *Model) viewSummary() string {
+	width := max(1, m.width-4)
+	header := logoStyle.Render(truncate("THIS YOU?  /  PROFILE SUMMARY", width))
+	help := "j/k or arrows scroll  •  g/G jump  •  esc/backspace return"
+	if width < 48 {
+		help = "j/k scroll  •  esc return"
+	}
+	footer := mutedStyle.Render(truncate(help, width))
+	content := lipgloss.JoinVertical(lipgloss.Left, header, m.summary.View(), footer)
 	framed := lipgloss.NewStyle().Padding(1, 2).Render(content)
 	return fillScreen(m.width, m.height, framed, lipgloss.Left, lipgloss.Top)
 }

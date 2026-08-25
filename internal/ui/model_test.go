@@ -410,6 +410,15 @@ func TestEveryScreenFitsCommonTerminalSizes(t *testing.T) {
 			assertViewSize(t, detail.View(), size.Width, size.Height)
 			detail.copying = true
 			assertViewSize(t, detail.View(), size.Width, size.Height)
+
+			summary := New(nil)
+			summary.username = "example"
+			for i := 0; i < 12; i++ {
+				summary.posts = append(summary.posts, reddit.Item{Kind: reddit.Post, Subreddit: fmt.Sprint("community", i), Score: i})
+			}
+			_, _ = summary.Update(size)
+			summary.openSummary()
+			assertViewSize(t, summary.View(), size.Width, size.Height)
 		})
 	}
 }
