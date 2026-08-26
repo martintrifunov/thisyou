@@ -10,26 +10,34 @@ import (
 )
 
 type profileSummary struct {
-	Posts         int
-	Comments      int
-	TotalScore    int
-	PostScore     int
-	CommentScore  int
-	AverageScore  float64
-	ActiveDays    int
-	BusiestDay    string
-	BusiestCount  int
-	Earliest      time.Time
-	Latest        time.Time
-	HasDateRange  bool
-	TopSubreddits []subredditSummary
+	Posts               int
+	Comments            int
+	TotalScore          int
+	PostScore           int
+	CommentScore        int
+	AverageScore        float64
+	ActiveDays          int
+	BusiestDay          string
+	BusiestCount        int
+	BusiestHour         int
+	BusiestHourCount    int
+	BusiestWeekday      time.Weekday
+	BusiestWeekdayCount int
+	UniqueSubreddits    int
+	NSFWRecords         int
+	Earliest            time.Time
+	Latest              time.Time
+	HasDateRange        bool
+	TopSubreddits       []subredditSummary
 }
 
 type subredditSummary struct {
-	Name     string
-	Posts    int
-	Comments int
-	Score    int
+	Name         string
+	Posts        int
+	Comments     int
+	Score        int
+	Share        float64
+	AverageScore float64
 }
 
 func (s profileSummary) totalRecords() int {
@@ -43,6 +51,8 @@ func (s subredditSummary) totalRecords() int {
 func summarizeProfile(posts, comments []reddit.Item) profileSummary {
 	summary := profileSummary{Posts: len(posts), Comments: len(comments)}
 	days := make(map[string]int)
+	hours := make(map[int]int)
+	weekdays := make(map[time.Weekday]int)
 	subreddits := make(map[string]subredditSummary)
 
 	consume := func(items []reddit.Item, isPost bool) {
@@ -58,6 +68,8 @@ func summarizeProfile(posts, comments []reddit.Item) profileSummary {
 				created := item.Time().Local()
 				day := created.Format("2006-01-02")
 				days[day]++
+				hours[created.Hour()]++
+				weekdays[created.Weekday()]++
 				if !summary.HasDateRange || created.Before(summary.Earliest) {
 					summary.Earliest = created
 				}
@@ -65,6 +77,9 @@ func summarizeProfile(posts, comments []reddit.Item) profileSummary {
 					summary.Latest = created
 				}
 				summary.HasDateRange = true
+			}
+			if item.Over18 {
+				summary.NSFWRecords++
 			}
 
 			displayName := strings.TrimSpace(item.Subreddit)
@@ -88,6 +103,7 @@ func summarizeProfile(posts, comments []reddit.Item) profileSummary {
 
 	consume(posts, true)
 	consume(comments, false)
+	summary.UniqueSubreddits = len(subreddits)
 	if total := summary.totalRecords(); total > 0 {
 		summary.AverageScore = float64(summary.TotalScore) / float64(total)
 	}
@@ -104,9 +120,23 @@ func summarizeProfile(posts, comments []reddit.Item) profileSummary {
 			summary.BusiestCount = days[day]
 		}
 	}
+	for hour := 0; hour < 24; hour++ {
+		if hours[hour] > summary.BusiestHourCount {
+			summary.BusiestHour = hour
+			summary.BusiestHourCount = hours[hour]
+		}
+	}
+	for weekday := time.Sunday; weekday <= time.Saturday; weekday++ {
+		if weekdays[weekday] > summary.BusiestWeekdayCount {
+			summary.BusiestWeekday = weekday
+			summary.BusiestWeekdayCount = weekdays[weekday]
+		}
+	}
 
 	summary.TopSubreddits = make([]subredditSummary, 0, len(subreddits))
 	for _, entry := range subreddits {
+		entry.Share = float64(entry.totalRecords()) / float64(max(1, summary.totalRecords())) * 100
+		entry.AverageScore = float64(entry.Score) / float64(max(1, entry.totalRecords()))
 		summary.TopSubreddits = append(summary.TopSubreddits, entry)
 	}
 	sort.Slice(summary.TopSubreddits, func(i, j int) bool {
@@ -156,6 +186,21 @@ func renderSummary(username string, summary profileSummary, unavailable, skipped
 	b.WriteString("\n" + wrapText(fmt.Sprintf("%d from posts  •  %d from comments", summary.PostScore, summary.CommentScore), width))
 	b.WriteString("\n" + mutedStyle.Render(wrapText("Archive scores are snapshots, not current Reddit profile karma.", width)))
 
+	b.WriteString("\n\n" + logoStyle.Render(truncate("ACTIVITY PATTERNS", width)) + "\n")
+	postShare := float64(summary.Posts) / float64(max(1, summary.totalRecords())) * 100
+	commentShare := float64(summary.Comments) / float64(max(1, summary.totalRecords())) * 100
+	b.WriteString(wrapText(fmt.Sprintf("%.0f%% posts  •  %.0f%% comments  •  %d communities", postShare, commentShare, summary.UniqueSubreddits), width))
+	if summary.BusiestHourCount > 0 {
+		peak := fmt.Sprintf("Peak hour: %02d:00–%02d:59 (%d records)", summary.BusiestHour, summary.BusiestHour, summary.BusiestHourCount)
+		if summary.BusiestWeekdayCount > 0 {
+			peak += fmt.Sprintf("  •  peak weekday: %s (%d)", summary.BusiestWeekday, summary.BusiestWeekdayCount)
+		}
+		b.WriteString("\n" + wrapText(peak, width))
+	}
+	if summary.NSFWRecords > 0 {
+		b.WriteString("\n" + mutedStyle.Render(wrapText(fmt.Sprintf("%d record(s) marked NSFW", summary.NSFWRecords), width)))
+	}
+
 	b.WriteString("\n\n" + logoStyle.Render(truncate("TOP SUBREDDITS", width)))
 	if len(summary.TopSubreddits) == 0 {
 		b.WriteString("\n" + mutedStyle.Render(wrapText("No subreddit data available.", width)))
@@ -163,7 +208,7 @@ func renderSummary(username string, summary profileSummary, unavailable, skipped
 	}
 	for i, entry := range summary.TopSubreddits {
 		name := fmt.Sprintf("%d. r/%s", i+1, entry.Name)
-		counts := fmt.Sprintf("%d records  •  %d posts  •  %d comments  •  %d score", entry.totalRecords(), entry.Posts, entry.Comments, entry.Score)
+		counts := fmt.Sprintf("%d records (%.1f%%)  •  %d posts  •  %d comments  •  %d score  •  %.1f average", entry.totalRecords(), entry.Share, entry.Posts, entry.Comments, entry.Score, entry.AverageScore)
 		b.WriteString("\n\n" + titleStyle.Render(wrapText(name, width)))
 		b.WriteString("\n" + mutedStyle.Render(wrapText(counts, width)))
 	}

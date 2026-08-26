@@ -34,6 +34,9 @@ func TestSummarizeProfile(t *testing.T) {
 	if got.ActiveDays != 2 || got.BusiestDay != "2025-01-03" || got.BusiestCount != 3 {
 		t.Fatalf("activity summary = %d days, busiest %q with %d", got.ActiveDays, got.BusiestDay, got.BusiestCount)
 	}
+	if got.BusiestHour != 12 || got.BusiestHourCount != 4 || got.UniqueSubreddits != 2 {
+		t.Fatalf("activity patterns = hour %d (%d), communities %d", got.BusiestHour, got.BusiestHourCount, got.UniqueSubreddits)
+	}
 	if !got.Earliest.Equal(first) || !got.Latest.Equal(second) {
 		t.Fatalf("date range = %v to %v", got.Earliest, got.Latest)
 	}
@@ -43,6 +46,9 @@ func TestSummarizeProfile(t *testing.T) {
 	top := got.TopSubreddits[0]
 	if top.Name != "golang" || top.Posts != 2 || top.Comments != 1 || top.Score != 11 {
 		t.Fatalf("top subreddit = %+v", top)
+	}
+	if top.Share != 75 || top.AverageScore != 11.0/3.0 {
+		t.Fatalf("top subreddit analytics = %+v", top)
 	}
 }
 

@@ -236,9 +236,18 @@ func comparisonMetrics(left, right profileSummary) []comparisonMetric {
 		{"Score snapshot", fmt.Sprint(left.TotalScore), fmt.Sprint(right.TotalScore)},
 		{"Average score", fmt.Sprintf("%.1f", left.AverageScore), fmt.Sprintf("%.1f", right.AverageScore)},
 		{"Active days", fmt.Sprint(left.ActiveDays), fmt.Sprint(right.ActiveDays)},
+		{"Communities", fmt.Sprint(left.UniqueSubreddits), fmt.Sprint(right.UniqueSubreddits)},
+		{"Peak hour", peakHour(left), peakHour(right)},
 		{"Top subreddit", topSubreddit(left), topSubreddit(right)},
 		{"Coverage", profileCoverage(left), profileCoverage(right)},
 	}
+}
+
+func peakHour(summary profileSummary) string {
+	if summary.BusiestHourCount == 0 {
+		return "unknown"
+	}
+	return fmt.Sprintf("%02d:00 (%d)", summary.BusiestHour, summary.BusiestHourCount)
 }
 
 func topSubreddit(summary profileSummary) string {
