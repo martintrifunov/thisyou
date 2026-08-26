@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/martintrifunov/thisyou/releases"><img src="https://img.shields.io/github/v/release/martintrifunov/thisyou?style=flat-square&color=ff4b2b" alt="Latest release"></a>
-  <a href="https://github.com/martintrifunov/thisyou/actions/workflows/windows.yml"><img src="https://img.shields.io/github/actions/workflow/status/martintrifunov/thisyou/windows.yml?style=flat-square&label=windows&color=ff4b2b" alt="Windows build"></a>
+  <a href="https://github.com/martintrifunov/thisyou/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/martintrifunov/thisyou/ci.yml?style=flat-square&label=builds&color=ff4b2b" alt="Cross-platform builds"></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.27"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/martintrifunov/thisyou?style=flat-square&color=ff4b2b" alt="MIT license"></a>
 </p>
@@ -32,9 +32,11 @@ workflow is required.
 - Sort by newest, oldest, score, or subreddit.
 - Inspect full records, open Reddit links, and copy useful fields.
 - View profile summaries, compare Redditors, and inspect source coverage.
-- Bookmark records locally and reopen cached histories offline.
+- Analyze subreddit share, activity patterns, and archived score snapshots.
+- Bookmark records, save profiles, and reopen cached histories offline.
+- Check archive availability on startup and manage local caches and exports.
 - Incrementally refresh an existing history without starting over.
-- Export the current result view to CSV, JSON, or Markdown.
+- Export the current result view to CSV, JSON, Markdown, or SQLite.
 
 ## Installation
 
@@ -75,6 +77,13 @@ To review the installer before running it:
 irm https://raw.githubusercontent.com/martintrifunov/thisyou/main/install.ps1 -OutFile install-thisyou.ps1
 Get-Content .\install-thisyou.ps1
 .\install-thisyou.ps1
+```
+
+The repository also contains a WinGet manifest awaiting inclusion in Microsoft's
+community package source. Once accepted, installation will be available as:
+
+```powershell
+winget install MartinTrifunov.ThisYou
 ```
 
 ### From source — macOS and Linux
@@ -127,11 +136,14 @@ Use `tab` to move between all records, posts, and comments. Select a result with
 | `C` | Compare the current profile with another Redditor |
 | `d` | Open archive stream and source-coverage diagnostics |
 | `R` | Fetch and merge records newer than the current history |
-| `e` | Export the current view as CSV, JSON, or Markdown |
+| `e` | Export the current view as CSV, JSON, Markdown, or SQLite |
 | `b` | Save or remove the selected bookmark |
+| `p` | Save or remove the current profile |
 | `B` | Open all saved bookmarks |
 | `ctrl+b` | Open bookmarks from the username screen |
 | `ctrl+o` | Open the entered user's latest cached history offline |
+| `ctrl+p` | Open saved profiles |
+| `ctrl+l` | Manage cached histories and exports |
 
 ### Record actions
 
@@ -167,15 +179,19 @@ privacy sub:AskReddit type:comment after:2025-01-01 min:10
 
 ## Exporting
 
-Press `e` from the results screen, then choose `c` for CSV, `j` for JSON, or `m`
-for Markdown. The export contains the current tab, filter, and sort order and is
-written to the directory where `thisyou` was started.
+Press `e` from the results screen, then choose `c` for CSV, `j` for JSON, `m`
+for Markdown, or `s` for SQLite. The export contains the current tab, filter,
+and sort order and is written to the configured export directory.
 
 ```text
 thisyou-username-20260825-153000.csv
 thisyou-username-20260825-153000.json
 thisyou-username-20260825-153000.md
+thisyou-username-20260825-153000.sqlite
 ```
+
+SQLite exports contain `metadata`, `records`, and `record_sources` tables, with
+indexes on subreddit and creation time.
 
 ## Cache and bookmarks
 
@@ -188,6 +204,35 @@ Bookmarks contain complete archived records and persist between sessions in
 `thisyou/bookmarks.json` inside the operating system's user-config directory.
 Cache and bookmark files are written atomically with permissions restricted to
 the current user.
+
+Press `p` from results to save a profile, then `ctrl+p` to reopen it from any
+search or results screen. Press `ctrl+l` to inspect cached-history and export
+sizes, open cached profiles, or delete an entry after confirmation.
+
+## Configuration
+
+On first launch, `thisyou` creates `thisyou/config.json` in the operating
+system's user-config directory. Available settings are:
+
+```json
+{
+  "version": 1,
+  "export_directory": ".",
+  "default_sort": "newest",
+  "request_timeout_seconds": 25,
+  "cache_enabled": true,
+  "startup_health_check": true,
+  "theme": {
+    "accent": "#ff4500",
+    "muted": "#818384",
+    "foreground": "#d7dadc",
+    "border": "#343536"
+  }
+}
+```
+
+`default_sort` accepts `newest`, `oldest`, `score`, or `subreddit`. Relative
+export paths are resolved from the directory where the application starts.
 
 ## How retrieval works
 
