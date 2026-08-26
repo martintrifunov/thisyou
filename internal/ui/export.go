@@ -40,6 +40,7 @@ func (m *Model) updateExportMenu(key string) tea.Cmd {
 		"c": historyexport.CSV,
 		"j": historyexport.JSON,
 		"m": historyexport.Markdown,
+		"s": historyexport.SQLite,
 	}
 	format, ok := formats[strings.ToLower(key)]
 	if !ok || len(key) != 1 {

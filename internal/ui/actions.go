@@ -133,7 +133,7 @@ func (m *Model) actionFooter(defaultText string) string {
 		text = "copy: u Reddit URL  t text  a author  s subreddit  l linked URL  esc cancel"
 		style = titleStyle
 	} else if m.exporting {
-		text = "export current view: c CSV  j JSON  m Markdown  esc cancel"
+		text = "export current view: c CSV  j JSON  m Markdown  s SQLite  esc cancel"
 		style = titleStyle
 	} else if m.notice != "" {
 		text = m.notice

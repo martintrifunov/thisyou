@@ -2,6 +2,7 @@ package historyexport
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/maco/thisyou/internal/reddit"
 )
@@ -20,6 +23,7 @@ const (
 	CSV      Format = "csv"
 	JSON     Format = "json"
 	Markdown Format = "md"
+	SQLite   Format = "sqlite"
 )
 
 type document struct {
@@ -53,6 +57,9 @@ func Write(directory, username string, items []reddit.Item, format Format, expor
 	}
 	if exportedAt.IsZero() {
 		exportedAt = time.Now()
+	}
+	if format == SQLite {
+		return writeSQLite(directory, username, items, exportedAt)
 	}
 	data, err := encode(username, items, format, exportedAt)
 	if err != nil {
@@ -90,6 +97,107 @@ func Write(directory, username string, items []reddit.Item, format Format, expor
 		return "", err
 	}
 	return target, nil
+}
+
+func writeSQLite(directory, username string, items []reddit.Item, exportedAt time.Time) (string, error) {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return "", err
+	}
+	temporary, err := os.CreateTemp(directory, ".thisyou-export-*.sqlite")
+	if err != nil {
+		return "", err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return "", err
+	}
+	if err := temporary.Close(); err != nil {
+		return "", err
+	}
+	database, err := sql.Open("sqlite", temporaryPath)
+	if err != nil {
+		return "", err
+	}
+	database.SetMaxOpenConns(1)
+	if err := populateSQLite(database, username, items, exportedAt); err != nil {
+		_ = database.Close()
+		return "", err
+	}
+	if err := database.Close(); err != nil {
+		return "", err
+	}
+	target, err := availablePath(directory, filename(username, SQLite, exportedAt))
+	if err != nil {
+		return "", err
+	}
+	if err := os.Rename(temporaryPath, target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+func populateSQLite(database *sql.DB, username string, items []reddit.Item, exportedAt time.Time) error {
+	transaction, err := database.Begin()
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	statements := []string{
+		`CREATE TABLE metadata (username TEXT NOT NULL, exported_at TEXT NOT NULL, record_count INTEGER NOT NULL)`,
+		`CREATE TABLE records (
+			kind TEXT NOT NULL, id TEXT NOT NULL, author TEXT, subreddit TEXT,
+			created_utc INTEGER, created_at TEXT, score INTEGER, title TEXT, body TEXT,
+			permalink TEXT, reddit_url TEXT, linked_url TEXT, num_comments INTEGER, nsfw INTEGER NOT NULL,
+			PRIMARY KEY (kind, id)
+		)`,
+		`CREATE TABLE record_sources (
+			kind TEXT NOT NULL, record_id TEXT NOT NULL, source TEXT NOT NULL,
+			PRIMARY KEY (kind, record_id, source),
+			FOREIGN KEY (kind, record_id) REFERENCES records(kind, id)
+		)`,
+		`CREATE INDEX records_subreddit_idx ON records(subreddit)`,
+		`CREATE INDEX records_created_utc_idx ON records(created_utc)`,
+	}
+	for _, statement := range statements {
+		if _, err := transaction.Exec(statement); err != nil {
+			return err
+		}
+	}
+	if _, err := transaction.Exec(
+		`INSERT INTO metadata (username, exported_at, record_count) VALUES (?, ?, ?)`,
+		username, exportedAt.UTC().Format(time.RFC3339), len(items),
+	); err != nil {
+		return err
+	}
+	recordStatement, err := transaction.Prepare(`INSERT INTO records (
+		kind, id, author, subreddit, created_utc, created_at, score, title, body,
+		permalink, reddit_url, linked_url, num_comments, nsfw
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer recordStatement.Close()
+	sourceStatement, err := transaction.Prepare(`INSERT OR IGNORE INTO record_sources (kind, record_id, source) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer sourceStatement.Close()
+	for _, item := range items {
+		if _, err := recordStatement.Exec(
+			item.Kind, item.ID, item.Author, item.Subreddit, item.CreatedUTC, item.Time().UTC().Format(time.RFC3339),
+			item.Score, item.Title, item.Body, item.Permalink, item.RedditURL(), item.URL, item.NumComments, item.Over18,
+		); err != nil {
+			return err
+		}
+		for _, source := range item.Sources {
+			if _, err := sourceStatement.Exec(item.Kind, item.ID, source); err != nil {
+				return err
+			}
+		}
+	}
+	return transaction.Commit()
 }
 
 func encode(username string, items []reddit.Item, format Format, exportedAt time.Time) ([]byte, error) {

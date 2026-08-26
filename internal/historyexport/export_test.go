@@ -1,6 +1,7 @@
 package historyexport
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"os"
@@ -22,7 +23,7 @@ func TestWriteExportsEveryFormatWithoutOverwriting(t *testing.T) {
 		CreatedUTC: exportedAt.Unix(), Score: 4, Body: "first,line\nsecond line",
 		Permalink: "/r/AskReddit/comments/post/title/one", Sources: []string{"Arctic Shift", "PullPush"},
 	}}
-	for _, format := range []Format{CSV, JSON, Markdown} {
+	for _, format := range []Format{CSV, JSON, Markdown, SQLite} {
 		first, err := Write(directory, "alice", items, format, exportedAt)
 		if err != nil {
 			t.Fatal(err)
@@ -41,6 +42,37 @@ func TestWriteExportsEveryFormatWithoutOverwriting(t *testing.T) {
 		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 			t.Fatalf("export permissions = %o, want 600", info.Mode().Perm())
 		}
+	}
+}
+
+func TestSQLiteExportCreatesQueryableTables(t *testing.T) {
+	directory := t.TempDir()
+	path, err := Write(directory, "alice", []reddit.Item{{
+		Kind: reddit.Comment, ID: "one", Author: "alice", Subreddit: "golang", Score: 7,
+		Sources: []string{"Arctic Shift", "PullPush"},
+	}}, SQLite, time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var username string
+	var count int
+	if err := database.QueryRow(`SELECT username, record_count FROM metadata`).Scan(&username, &count); err != nil {
+		t.Fatal(err)
+	}
+	if username != "alice" || count != 1 {
+		t.Fatalf("metadata = %q, %d", username, count)
+	}
+	var sources int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM record_sources`).Scan(&sources); err != nil {
+		t.Fatal(err)
+	}
+	if sources != 2 {
+		t.Fatalf("source rows = %d, want 2", sources)
 	}
 }
 
