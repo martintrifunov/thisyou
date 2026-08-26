@@ -9,9 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/maco/thisyou/internal/config"
-	"github.com/maco/thisyou/internal/reddit"
-	"github.com/maco/thisyou/internal/ui"
+	"github.com/martintrifunov/thisyou/internal/config"
+	"github.com/martintrifunov/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/ui"
 )
 
 var version = "0.2.0"

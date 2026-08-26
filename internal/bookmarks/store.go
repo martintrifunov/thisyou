@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 const fileVersion = 1

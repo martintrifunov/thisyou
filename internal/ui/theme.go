@@ -3,7 +3,7 @@ package ui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/maco/thisyou/internal/config"
+	"github.com/martintrifunov/thisyou/internal/config"
 )
 
 func ApplyTheme(theme config.Theme) {

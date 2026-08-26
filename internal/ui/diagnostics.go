@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 func (m *Model) openDiagnostics() {

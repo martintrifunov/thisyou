@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 func TestWriteExportsEveryFormatWithoutOverwriting(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/maco/thisyou/internal/profiles"
+	"github.com/martintrifunov/thisyou/internal/profiles"
 )
 
 type fakeProfileStore struct {

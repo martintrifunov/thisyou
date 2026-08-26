@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/maco/thisyou/internal/bookmarks"
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/bookmarks"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 func TestToggleSelectedBookmark(t *testing.T) {

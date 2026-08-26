@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/maco/thisyou/internal/historycache"
-	"github.com/maco/thisyou/internal/localdata"
+	"github.com/martintrifunov/thisyou/internal/historycache"
+	"github.com/martintrifunov/thisyou/internal/localdata"
 )
 
 type localHistoryStore interface {

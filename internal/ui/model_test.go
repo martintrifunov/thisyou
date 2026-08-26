@@ -11,10 +11,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/maco/thisyou/internal/bookmarks"
-	"github.com/maco/thisyou/internal/historycache"
-	"github.com/maco/thisyou/internal/profiles"
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/bookmarks"
+	"github.com/martintrifunov/thisyou/internal/historycache"
+	"github.com/martintrifunov/thisyou/internal/profiles"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 type fakeHistoryStore struct {

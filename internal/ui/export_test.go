@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/maco/thisyou/internal/historyexport"
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/historyexport"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 func TestExportCurrentVisibleView(t *testing.T) {

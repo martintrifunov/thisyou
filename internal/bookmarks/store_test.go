@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 func TestStoreTogglePersistsAndRemovesBookmark(t *testing.T) {

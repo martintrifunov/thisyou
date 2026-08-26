@@ -17,13 +17,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/maco/thisyou/internal/bookmarks"
-	"github.com/maco/thisyou/internal/config"
-	"github.com/maco/thisyou/internal/historycache"
-	"github.com/maco/thisyou/internal/historyexport"
-	"github.com/maco/thisyou/internal/localdata"
-	"github.com/maco/thisyou/internal/profiles"
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/bookmarks"
+	"github.com/martintrifunov/thisyou/internal/config"
+	"github.com/martintrifunov/thisyou/internal/historycache"
+	"github.com/martintrifunov/thisyou/internal/historyexport"
+	"github.com/martintrifunov/thisyou/internal/localdata"
+	"github.com/martintrifunov/thisyou/internal/profiles"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 const logo = `

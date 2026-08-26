@@ -1,4 +1,4 @@
-module github.com/maco/thisyou
+module github.com/martintrifunov/thisyou
 
 go 1.27.0
 

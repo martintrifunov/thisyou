@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/maco/thisyou/internal/historycache"
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/historycache"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 type historyStore interface {

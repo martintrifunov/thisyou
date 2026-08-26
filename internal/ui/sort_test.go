@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 func TestSortItemsModes(t *testing.T) {

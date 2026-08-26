@@ -14,7 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/maco/thisyou/internal/reddit"
+	"github.com/martintrifunov/thisyou/internal/reddit"
 )
 
 type Format string

@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/maco/thisyou/internal/profiles"
+	"github.com/martintrifunov/thisyou/internal/profiles"
 )
 
 type profileStore interface {
