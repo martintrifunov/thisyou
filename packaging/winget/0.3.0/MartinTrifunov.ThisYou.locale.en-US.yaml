@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: MartinTrifunov.ThisYou
+PackageVersion: 0.3.0
+PackageLocale: en-US
+Publisher: Martin Trifunov
+PublisherUrl: https://github.com/martintrifunov
+PublisherSupportUrl: https://github.com/martintrifunov/thisyou/issues
+PackageName: thisyou
+PackageUrl: https://github.com/martintrifunov/thisyou
+License: MIT
+LicenseUrl: https://github.com/martintrifunov/thisyou/blob/v0.3.0/LICENSE
+ShortDescription: Explore a Reddit user's archived posts and comments from a terminal UI.
+Description: A keyboard-driven terminal interface that searches Arctic Shift and PullPush concurrently, then merges and deduplicates archived Reddit posts and comments.
+Tags:
+  - archive
+  - cli
+  - reddit
+  - terminal
+  - tui
+ReleaseNotesUrl: https://github.com/martintrifunov/thisyou/releases/tag/v0.3.0
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+PackageIdentifier: MartinTrifunov.ThisYou
+PackageVersion: 0.3.0
+InstallerType: zip
+NestedInstallerType: portable
+UpgradeBehavior: install
+ReleaseDate: 2026-08-26
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/martintrifunov/thisyou/releases/download/v0.3.0/thisyou-windows-amd64.zip
+    InstallerSha256: A71ADE19F915AF3AADF7FBA7548583CE720C385AB0EB94333896B7A9EA31DE65
+    NestedInstallerFiles:
+      - RelativeFilePath: thisyou.exe
+        PortableCommandAlias: thisyou
+  - Architecture: arm64
+    InstallerUrl: https://github.com/martintrifunov/thisyou/releases/download/v0.3.0/thisyou-windows-arm64.zip
+    InstallerSha256: 9F5003FB6166AB6B44F0C8ECCACDE8243DCC3C075D54708973C9CA632F054FE8
+    NestedInstallerFiles:
+      - RelativeFilePath: thisyou.exe
+        PortableCommandAlias: thisyou
+ManifestType: installer
+ManifestVersion: 1.12.0
