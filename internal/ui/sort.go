@@ -33,6 +33,19 @@ func (s sortMode) label() string {
 	}
 }
 
+func parseSortMode(value string) sortMode {
+	switch value {
+	case "oldest":
+		return oldestFirst
+	case "score":
+		return highestScore
+	case "subreddit":
+		return subredditName
+	default:
+		return newestFirst
+	}
+}
+
 func sortItems(items []reddit.Item, mode sortMode) {
 	sort.SliceStable(items, func(i, j int) bool {
 		left, right := items[i], items[j]

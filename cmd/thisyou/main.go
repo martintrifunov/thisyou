@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/maco/thisyou/internal/config"
 	"github.com/maco/thisyou/internal/reddit"
 	"github.com/maco/thisyou/internal/ui"
 )
@@ -17,8 +20,16 @@ func main() {
 	if writeVersion(os.Args[1:], os.Stdout) {
 		return
 	}
+	settings, path, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "thisyou: load %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	client := reddit.NewClient()
+	client.HTTP = &http.Client{Timeout: time.Duration(settings.RequestTimeoutSeconds) * time.Second}
+	ui.ApplyTheme(settings.Theme)
 	program := tea.NewProgram(
-		ui.New(reddit.NewClient()),
+		ui.NewWithConfig(client, settings),
 		tea.WithAltScreen(),
 	)
 	if _, err := program.Run(); err != nil {

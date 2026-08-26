@@ -76,6 +76,8 @@ func renderHelp(width int) string {
 			{"enter", "Search the entered Reddit username"},
 			{"ctrl+o", "Open that user's latest cached history offline"},
 			{"ctrl+b", "Open saved bookmarks"},
+			{"ctrl+p", "Open saved profiles"},
+			{"ctrl+l", "Manage cached histories and exports"},
 			{"esc", "Clear the username or cancel an active crawl"},
 		}},
 		{"BROWSE RESULTS", []helpEntry{
@@ -88,10 +90,11 @@ func renderHelp(width int) string {
 		}},
 		{"RESULT ACTIONS", []helpEntry{
 			{"b", "Save or remove the selected bookmark"},
+			{"p", "Save or remove the current profile"},
 			{"B", "Open all saved bookmarks"},
 			{"o", "Open the selected record on Reddit"},
 			{"y", "Copy a URL, text, author, subreddit, or linked URL"},
-			{"e", "Export the current tab, filter, and sort as CSV, JSON, or Markdown"},
+			{"e", "Export the current tab, filter, and sort as CSV, JSON, Markdown, or SQLite"},
 			{"s", "Open the current profile summary"},
 			{"S", "Cycle newest, oldest, score, and subreddit sorting"},
 			{"/", "Filter the current result view"},
@@ -110,9 +113,10 @@ func renderHelp(width int) string {
 			{"enter / esc", "Apply the filter or clear it"},
 		}},
 		{"SCROLLABLE VIEWS", []helpEntry{
-			{"j / k, arrows", "Scroll records, summaries, diagnostics, comparisons, or help"},
+			{"j / k, arrows", "Scroll records, profiles, local data, summaries, diagnostics, comparisons, or help"},
 			{"g / G", "Jump to the top or bottom"},
 			{"esc / backspace", "Return to the previous screen"},
+			{"x then y", "Confirm deletion of a selected cache or export in Local Data"},
 		}},
 		{"GLOBAL", []helpEntry{
 			{"?", "Open or close this command reference"},

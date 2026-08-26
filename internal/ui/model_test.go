@@ -13,6 +13,7 @@ import (
 
 	"github.com/maco/thisyou/internal/bookmarks"
 	"github.com/maco/thisyou/internal/historycache"
+	"github.com/maco/thisyou/internal/profiles"
 	"github.com/maco/thisyou/internal/reddit"
 )
 
@@ -630,6 +631,18 @@ func TestEveryScreenFitsCommonTerminalSizes(t *testing.T) {
 			saved.screen = bookmarksScreen
 			_, _ = saved.Update(size)
 			assertViewSize(t, saved.View(), size.Width, size.Height)
+
+			profileList := New(nil)
+			profileList.replaceProfiles([]profiles.Entry{{Username: "example", SavedAt: time.Now()}})
+			profileList.screen = profilesScreen
+			_, _ = profileList.Update(size)
+			assertViewSize(t, profileList.View(), size.Width, size.Height)
+
+			data := New(nil)
+			data.dataEntries = []dataEntry{{kind: "CACHE", name: "example", posts: 12, comments: 30, bytes: 2048}, {kind: "EXPORT", name: "thisyou-example.json", bytes: 1024}}
+			data.screen = dataScreen
+			_, _ = data.Update(size)
+			assertViewSize(t, data.View(), size.Width, size.Height)
 		})
 	}
 }

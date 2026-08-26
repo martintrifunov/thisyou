@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -17,7 +18,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/maco/thisyou/internal/bookmarks"
+	"github.com/maco/thisyou/internal/config"
 	"github.com/maco/thisyou/internal/historycache"
+	"github.com/maco/thisyou/internal/historyexport"
+	"github.com/maco/thisyou/internal/localdata"
+	"github.com/maco/thisyou/internal/profiles"
 	"github.com/maco/thisyou/internal/reddit"
 )
 
@@ -44,6 +49,8 @@ const (
 	compareLoadingScreen
 	comparisonScreen
 	helpScreen
+	profilesScreen
+	dataScreen
 )
 
 type tab int
@@ -84,12 +91,20 @@ type searchEvent struct {
 
 type searchResult = reddit.Result
 
+type healthMsg struct {
+	results []reddit.Health
+}
+
 type Model struct {
 	client        *reddit.Client
+	config        config.Config
 	openURL       func(string) error
 	copyText      func(string) error
 	store         bookmarkStore
 	history       historyStore
+	historyData   localHistoryStore
+	profiles      profileStore
+	exports       exportStore
 	exportHistory exportWriter
 
 	screen       screen
@@ -126,6 +141,22 @@ type Model struct {
 	detailReturn     screen
 	bookmarksLoading bool
 	bookmarkRequest  uint64
+	savedProfiles    []profiles.Entry
+	savedProfileIDs  map[string]struct{}
+	profileSelected  int
+	profileOffset    int
+	profileReturn    screen
+	profilesLoading  bool
+	profileRequest   uint64
+	dataEntries      []dataEntry
+	dataSelected     int
+	dataOffset       int
+	dataReturn       screen
+	dataLoading      bool
+	dataConfirm      bool
+	dataRequest      uint64
+	health           []reddit.Health
+	healthLoading    bool
 
 	filtering       bool
 	filterErr       string
@@ -159,6 +190,10 @@ type Model struct {
 }
 
 func New(client *reddit.Client) *Model {
+	return NewWithConfig(client, config.Default())
+}
+
+func NewWithConfig(client *reddit.Client, settings config.Config) *Model {
 	if client == nil {
 		client = reddit.NewClient()
 	}
@@ -189,32 +224,48 @@ func New(client *reddit.Client) *Model {
 	spin := spinner.New()
 	spin.Spinner = spinner.Dot
 	spin.Style = lipgloss.NewStyle().Foreground(orange)
+	history := historycache.NewStore()
 
 	return &Model{
-		client:        client,
-		openURL:       openInBrowser,
-		copyText:      copyToClipboard,
-		store:         bookmarks.NewStore(),
-		history:       historycache.NewStore(),
-		exportHistory: writeExport,
-		screen:        searchScreen,
-		input:         in,
-		filter:        filter,
-		compareInput:  compareInput,
-		spinner:       spin,
-		detail:        viewport.New(80, 20),
-		summary:       viewport.New(80, 20),
-		diagnostics:   viewport.New(80, 20),
-		comparison:    viewport.New(80, 20),
-		help:          viewport.New(80, 20),
-		status:        make(map[string]reddit.Progress),
-		bookmarkIDs:   make(map[string]struct{}),
-		compareStatus: make(map[string]reddit.Progress),
-		detailReturn:  resultsScreen,
+		client:      client,
+		config:      settings,
+		openURL:     openInBrowser,
+		copyText:    copyToClipboard,
+		store:       bookmarks.NewStore(),
+		history:     history,
+		historyData: history,
+		profiles:    profiles.NewStore(),
+		exports:     localdata.NewExportStore(settings.ExportDirectory),
+		exportHistory: func(username string, items []reddit.Item, format historyexport.Format) (string, error) {
+			return historyexport.Write(settings.ExportDirectory, username, items, format, time.Now())
+		},
+		screen:          searchScreen,
+		input:           in,
+		filter:          filter,
+		compareInput:    compareInput,
+		spinner:         spin,
+		detail:          viewport.New(80, 20),
+		summary:         viewport.New(80, 20),
+		diagnostics:     viewport.New(80, 20),
+		comparison:      viewport.New(80, 20),
+		help:            viewport.New(80, 20),
+		status:          make(map[string]reddit.Progress),
+		bookmarkIDs:     make(map[string]struct{}),
+		savedProfileIDs: make(map[string]struct{}),
+		compareStatus:   make(map[string]reddit.Progress),
+		detailReturn:    resultsScreen,
+		ordering:        parseSortMode(settings.DefaultSort),
 	}
 }
 
-func (m *Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.loadBookmarks(true)) }
+func (m *Model) Init() tea.Cmd {
+	commands := []tea.Cmd{textinput.Blink, m.loadBookmarks(true), m.loadProfiles(true)}
+	if m.config.StartupHealthCheck {
+		m.healthLoading = true
+		commands = append(commands, m.checkHealth())
+	}
+	return tea.Batch(commands...)
+}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -229,6 +280,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeComparison()
 		m.resizeHelp()
 		m.ensureVisible()
+		m.ensureProfileVisible()
+		m.ensureDataVisible()
 		return m, nil
 	case searchEvent:
 		if msg.id != m.searchID || m.screen != loadingScreen {
@@ -286,6 +339,43 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.noticeError = false
 		}
 		return m, nil
+	case profileMsg:
+		if msg.id != m.profileRequest {
+			return m, nil
+		}
+		m.profilesLoading = false
+		if msg.err != nil {
+			if !msg.silent {
+				m.setActionError("saved profiles: " + msg.err.Error())
+			}
+			return m, nil
+		}
+		m.replaceProfiles(msg.entries)
+		if msg.notice != "" {
+			m.notice = msg.notice
+			m.noticeError = false
+		}
+		return m, nil
+	case dataMsg:
+		if msg.id != m.dataRequest {
+			return m, nil
+		}
+		m.dataLoading = false
+		if msg.err != nil {
+			m.setActionError("local data: " + msg.err.Error())
+			return m, nil
+		}
+		m.dataEntries = msg.entries
+		m.ensureDataVisible()
+		if msg.notice != "" {
+			m.notice = msg.notice
+			m.noticeError = false
+		}
+		return m, nil
+	case healthMsg:
+		m.healthLoading = false
+		m.health = msg.results
+		return m, nil
 	case bookmarkMsg:
 		if msg.id != m.bookmarkRequest {
 			return m, nil
@@ -325,6 +415,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if ok && key.String() == "ctrl+b" && (m.screen == searchScreen || m.screen == resultsScreen) {
 		return m, m.openBookmarks()
 	}
+	if ok && key.String() == "ctrl+p" && (m.screen == searchScreen || m.screen == resultsScreen) {
+		return m, m.openProfiles()
+	}
+	if ok && key.String() == "ctrl+l" && (m.screen == searchScreen || m.screen == resultsScreen) {
+		return m, m.openDataManager()
+	}
 	if ok && key.String() == "?" && m.screen != loadingScreen && m.screen != compareLoadingScreen && m.screen != helpScreen {
 		m.openHelp()
 		return m, nil
@@ -353,6 +449,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateComparison(msg)
 	case helpScreen:
 		return m.updateHelp(msg)
+	case profilesScreen:
+		return m.updateProfiles(msg)
+	case dataScreen:
+		return m.updateDataManager(msg)
 	default:
 		return m, nil
 	}
@@ -547,6 +647,8 @@ func (m *Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.toggleBookmark(m.visible[m.selected])
 		}
 		m.setActionError("no record selected")
+	case "p":
+		return m, m.toggleProfile(m.username)
 	}
 	return m, nil
 }
@@ -648,7 +750,7 @@ func (m *Model) beginSearch() tea.Cmd {
 			}
 		})
 		var cacheErr error
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && m.config.CacheEnabled {
 			cacheErr = cacheSnapshot(store, username, result)
 		}
 		select {
@@ -705,7 +807,7 @@ func (m *Model) beginRefresh() tea.Cmd {
 		merged := reddit.MergeResults(base, fresh)
 		added := len(merged.Posts) + len(merged.Comments) - len(base.Posts) - len(base.Comments)
 		var cacheErr error
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && m.config.CacheEnabled {
 			cacheErr = cacheSnapshot(store, username, merged)
 		}
 		select {
@@ -761,7 +863,7 @@ func (m *Model) prepareSearch() {
 	m.filter.SetValue("")
 	m.filter.Blur()
 	m.tab = allTab
-	m.ordering = newestFirst
+	m.ordering = parseSortMode(m.config.DefaultSort)
 	m.selected, m.offset = 0, 0
 	m.fromCache = false
 	m.cachedAt = time.Time{}
@@ -917,6 +1019,10 @@ func (m *Model) View() string {
 		return m.viewComparison()
 	case helpScreen:
 		return m.viewHelp()
+	case profilesScreen:
+		return m.viewProfiles()
+	case dataScreen:
+		return m.viewDataManager()
 	default:
 		return ""
 	}
@@ -945,12 +1051,43 @@ func (m *Model) viewSearch() string {
 	if m.searchErr != "" {
 		b.WriteString("\n" + errorStyle.Render(wrapText(m.searchErr, contentWidth)))
 	}
+	if m.config.StartupHealthCheck && m.height >= 18 {
+		b.WriteString("\n" + mutedStyle.Render(truncate(m.healthSummary(), contentWidth)))
+	}
 	help := "enter search  •  ctrl+o offline  •  ? help  •  ctrl+c quit"
 	if m.width < 30 {
 		help = "enter  •  ^o cache  •  ? help  •  ^c quit"
 	}
 	b.WriteString(gap + mutedStyle.Render(wrapText(help, contentWidth)))
 	return center(m.width, m.height, b.String())
+}
+
+func (m *Model) checkHealth() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		return healthMsg{results: client.CheckHealth(ctx)}
+	}
+}
+
+func (m *Model) healthSummary() string {
+	if m.healthLoading || len(m.health) == 0 {
+		return "Archives: checking availability..."
+	}
+	parts := make([]string, 0, len(m.health))
+	for _, value := range m.health {
+		state := "offline"
+		if value.Available {
+			state = "online"
+		} else if value.StatusCode == http.StatusTooManyRequests {
+			state = "rate limited"
+		} else if value.StatusCode > 0 {
+			state = fmt.Sprintf("HTTP %d", value.StatusCode)
+		}
+		parts = append(parts, value.Source+" "+state)
+	}
+	return "Archives: " + strings.Join(parts, "  •  ")
 }
 
 func (m *Model) viewLoading() string {
@@ -1016,6 +1153,9 @@ func (m *Model) viewResults() string {
 	var b strings.Builder
 	contentWidth := max(4, m.width-4)
 	headerText := fmt.Sprintf("THIS YOU?  /  u/%s  /  %s", m.username, m.ordering.label())
+	if m.isProfileSaved(m.username) {
+		headerText += "  /  SAVED"
+	}
 	if m.fromCache {
 		headerText += "  /  CACHED " + m.cachedAt.Local().Format("2006-01-02 15:04")
 	}
