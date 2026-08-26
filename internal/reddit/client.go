@@ -46,6 +46,14 @@ type Result struct {
 	SuccessfulStreams int
 }
 
+type Health struct {
+	Source     string
+	Available  bool
+	StatusCode int
+	Latency    time.Duration
+	Err        error
+}
+
 type Client struct {
 	HTTP        *http.Client
 	ArcticShift string
@@ -60,6 +68,40 @@ func NewClient() *Client {
 		PullPush:    defaultPullPush,
 		RetryDelay:  1200 * time.Millisecond,
 	}
+}
+
+func (c *Client) CheckHealth(ctx context.Context) []Health {
+	sources := []source{{"Arctic Shift", c.ArcticShift}, {"PullPush", c.PullPush}}
+	results := make(chan Health, len(sources))
+	for _, value := range sources {
+		go func(value source) {
+			started := time.Now()
+			req, err := http.NewRequestWithContext(ctx, http.MethodHead, strings.TrimRight(value.base, "/"), nil)
+			if err != nil {
+				results <- Health{Source: value.name, Latency: time.Since(started), Err: err}
+				return
+			}
+			req.Header.Set("User-Agent", "thisyou/1.0 (archive health check)")
+			client := c.HTTP
+			if client == nil {
+				client = http.DefaultClient
+			}
+			response, err := client.Do(req)
+			health := Health{Source: value.name, Latency: time.Since(started), Err: err}
+			if response != nil {
+				health.StatusCode = response.StatusCode
+				health.Available = response.StatusCode >= 200 && response.StatusCode < 400
+				_ = response.Body.Close()
+			}
+			results <- health
+		}(value)
+	}
+	health := make([]Health, 0, len(sources))
+	for range sources {
+		health = append(health, <-results)
+	}
+	sort.Slice(health, func(i, j int) bool { return health[i].Source < health[j].Source })
+	return health
 }
 
 func (c *Client) SearchAll(ctx context.Context, username string, progress func(Progress)) Result {
