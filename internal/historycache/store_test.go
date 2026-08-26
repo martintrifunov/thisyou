@@ -82,3 +82,22 @@ func TestStoreCanonicalizesUsernameCase(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStoreListsAndDeletesSnapshots(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	store := NewStoreAt(directory)
+	if err := store.Save(Snapshot{Username: "alice", Posts: []reddit.Item{{ID: "one"}}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.List()
+	if err != nil || len(entries) != 1 || entries[0].Username != "alice" || entries[0].Posts != 1 || entries[0].Bytes == 0 {
+		t.Fatalf("entries = %#v, err = %v", entries, err)
+	}
+	if err := store.Delete("alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.Load("alice"); err != nil || found {
+		t.Fatalf("deleted cache = found %v, err %v", found, err)
+	}
+}

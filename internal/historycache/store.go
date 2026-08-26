@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,14 @@ type Store struct {
 	directory string
 	pathErr   error
 	mu        sync.Mutex
+}
+
+type Entry struct {
+	Username string
+	SavedAt  time.Time
+	Posts    int
+	Comments int
+	Bytes    int64
 }
 
 type fileData struct {
@@ -122,6 +131,67 @@ func (s *Store) Save(snapshot Snapshot) error {
 		return err
 	}
 	return os.Rename(temporaryPath, s.path(snapshot.Username))
+}
+
+func (s *Store) List() ([]Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pathErr != nil {
+		return nil, s.pathErr
+	}
+	files, err := os.ReadDir(s.directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]Entry, 0, len(files))
+	for _, file := range files {
+		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(s.directory, file.Name()))
+		if err != nil {
+			return nil, err
+		}
+		var stored fileData
+		if err := json.Unmarshal(data, &stored); err != nil || stored.Version != fileVersion {
+			continue
+		}
+		username, err := normalizeUsername(stored.Snapshot.Username)
+		if err != nil || username+".json" != file.Name() {
+			continue
+		}
+		entries = append(entries, Entry{
+			Username: username, SavedAt: stored.Snapshot.SavedAt,
+			Posts: len(stored.Snapshot.Posts), Comments: len(stored.Snapshot.Comments), Bytes: int64(len(data)),
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if !entries[i].SavedAt.Equal(entries[j].SavedAt) {
+			return entries[i].SavedAt.After(entries[j].SavedAt)
+		}
+		return entries[i].Username < entries[j].Username
+	})
+	return entries, nil
+}
+
+func (s *Store) Delete(username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pathErr != nil {
+		return s.pathErr
+	}
+	normalized, err := normalizeUsername(username)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(s.path(normalized))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func (s *Store) path(username string) string {
