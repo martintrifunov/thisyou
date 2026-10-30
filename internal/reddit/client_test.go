@@ -8,10 +8,62 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestSearchAllRejectsMissingData(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{`{"message":"archive unavailable"}`, `{"data":null}`} {
+		t.Run(body, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, body)
+			}))
+			defer server.Close()
+			client := NewClient()
+			client.ArcticShift, client.PullPush = server.URL, server.URL
+			result := client.SearchAll(context.Background(), "alice", nil)
+			if result.SuccessfulStreams != 0 || len(result.Errors) != 4 {
+				t.Fatalf("missing data treated as success: %#v", result)
+			}
+		})
+	}
+}
+
+func TestSearchAllAcceptsEmptyData(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer server.Close()
+	client := NewClient()
+	client.ArcticShift, client.PullPush = server.URL, server.URL
+	result := client.SearchAll(context.Background(), "alice", nil)
+	if result.SuccessfulStreams != 4 || len(result.Errors) != 0 {
+		t.Fatalf("empty history rejected: %#v", result)
+	}
+}
+
+func TestGetRejectsOversizedResponse(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// The limit cuts off trailing whitespace, leaving valid but incomplete JSON.
+		fmt.Fprint(w, `{"data":[]}`)
+		padding := strings.Repeat(" ", 4096)
+		for written := 0; written < maxResponseBytes; written += len(padding) {
+			if _, err := fmt.Fprint(w, padding); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+	if _, err := NewClient().get(context.Background(), server.URL, false); err == nil {
+		t.Fatal("oversized response accepted")
+	}
+}
 
 func TestSearchAllMergesSourcesAndKinds(t *testing.T) {
 	t.Parallel()
@@ -29,7 +81,7 @@ func TestSearchAllMergesSourcesAndKinds(t *testing.T) {
 		case "/api/comments/search":
 			records = []map[string]any{{"id": "comment-1", "author": "alice", "created_utc": 25.0, "body": "hello"}}
 		case "/reddit/search/comment/":
-			records = nil
+			records = []map[string]any{}
 		default:
 			http.NotFound(w, r)
 			return

@@ -3,6 +3,7 @@ package reddit
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -134,16 +135,23 @@ func parseTimestamp(raw json.RawMessage) (int64, error) {
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err == nil {
 		if n, err := number.Int64(); err == nil {
-			return n, nil
-		}
-		if f, err := strconv.ParseFloat(number.String(), 64); err == nil {
-			return int64(f), nil
+			if n > 0 {
+				return n, nil
+			}
+			return 0, fmt.Errorf("invalid created_utc %q", raw)
 		}
 	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		f, err := strconv.ParseFloat(text, 64)
-		return int64(f), err
+	text := number.String()
+	if text == "" {
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return 0, fmt.Errorf("invalid created_utc %q", raw)
+		}
+	}
+	// Reject non-finite and out-of-range values before converting to int64.
+	// A non-positive cursor can stop a crawl early and discard valid records.
+	f, err := strconv.ParseFloat(text, 64)
+	if err == nil && !math.IsNaN(f) && f >= 1 && f < 0x1p63 {
+		return int64(f), nil
 	}
 	return 0, fmt.Errorf("invalid created_utc %q", raw)
 }

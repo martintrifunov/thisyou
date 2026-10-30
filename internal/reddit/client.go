@@ -248,6 +248,11 @@ func (c *Client) fetchPage(ctx context.Context, username string, kind Kind, src 
 	if envelope.Error != nil && len(envelope.Data) == 0 {
 		return nil, nil, fmt.Errorf("archive error: %v", envelope.Error)
 	}
+	// A missing or null data field must not be treated as a successful empty
+	// history, which could overwrite a populated cache. An empty array is fine.
+	if envelope.Data == nil {
+		return nil, nil, fmt.Errorf("archive response is missing data")
+	}
 	items := make([]Item, 0, len(envelope.Data))
 	var warnings []error
 	for index, raw := range envelope.Data {
@@ -282,7 +287,7 @@ func (c *Client) get(ctx context.Context, endpoint string, retry bool) ([]byte, 
 		}
 		return nil, err
 	}
-	body, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
+	body, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	_ = res.Body.Close()
 	if readErr != nil {
 		return nil, readErr
@@ -306,6 +311,9 @@ func (c *Client) get(ctx context.Context, endpoint string, retry bool) ([]byte, 
 			message = message[:180] + "..."
 		}
 		return nil, fmt.Errorf("HTTP %d: %s", res.StatusCode, message)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("archive response exceeds %d bytes", maxResponseBytes)
 	}
 	return body, nil
 }

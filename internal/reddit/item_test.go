@@ -101,3 +101,23 @@ func TestMergeItemPreservesPreferredZeroValues(t *testing.T) {
 		t.Fatalf("merged numeric values = score %d, comments %d", merged.Score, merged.NumComments)
 	}
 }
+
+func TestParseTimestampRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{`"NaN"`, `"Inf"`, `"-Inf"`, `9223372036854775808`, `"9223372036854775808"`, `-1`, `0`, `0.5`, `true`, `null`} {
+		t.Run(raw, func(t *testing.T) {
+			if got, err := parseTimestamp(json.RawMessage(raw)); err == nil {
+				t.Fatalf("parseTimestamp(%s) = %d without an error", raw, got)
+			}
+		})
+	}
+}
+
+func TestParseTimestampAcceptsArchiveFormats(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{`1787659200`, `1787659200.5`, `"1787659200"`, `"1787659200.5"`} {
+		if got, err := parseTimestamp(json.RawMessage(raw)); err != nil || got != 1787659200 {
+			t.Fatalf("parseTimestamp(%s) = %d, %v", raw, got, err)
+		}
+	}
+}
