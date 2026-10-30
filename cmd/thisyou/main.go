@@ -14,7 +14,7 @@ import (
 	"github.com/martintrifunov/thisyou/internal/ui"
 )
 
-var version = "0.3.0"
+var version = "0.3.1"
 
 func main() {
 	if writeVersion(os.Args[1:], os.Stdout) {
